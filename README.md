@@ -10,6 +10,22 @@ Xtensa-based ESP32 MCUs (ESP32, ESP32-S2, ESP32-S3).
 On the **ESP32-S3**, the MCU's SIMD instructions ("PIE") are used which further speeds up compression
 by ~6x.
 
+Exemplary benchmark:
+
+Heatshrink (12,4), compressing 5614 bytes of text down to 2635 bytes on an ESP32-S3:
+
+| Variant | CPU cycles | rel. CPU cycles | rel. Speed |
+|--|--|--|--|
+| Original | 81429230 | 100,0 % | 1,0x |
+| 32-bit | 61566318 | 75,6 % | 1,3x |
+| New search | 51254828 | 62,9 % | 1,6x |
+| Xtensa optimized | 34800036 | 42,7 % | 2,3x |
+| ESP32-S3 SIMD | 5703885 | 7,0 % | 14,3x |
+| Original w/ USE_INDEX(*) | 3629992 | 4,5 % | 22,4x |
+
+(*) HEATSHRINK_USE_INDEX increases RAM requirement for compression by ~3x
+
+
 Heatshrink's original Readme below:
 
 # heatshrink
