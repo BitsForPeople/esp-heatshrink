@@ -4,11 +4,11 @@ This is a modification of the heatshrink data compression library intended for u
 The original heatshrink is made into a component for use in ESP-IDF builds and speed-optimized for
 32 bit architectures like the ESP32s', including new and faster pattern-match search functions.
 
-The new search functions take advantage of Xtensa instruction set features when built for
-Xtensa-based ESP32 MCUs (ESP32, ESP32-S2, ESP32-S3).
+The new search functions take advantage of Xtensa's "zero-overhead loops" when built for supporting
+Xtensa-based ESP32 MCUs (ESP32, ESP32-S3).
 
 On the **ESP32-S3**, the MCU's SIMD instructions ("PIE") are used which further speeds up compression
-by ~6x.
+by a factor of _a lot_.
 
 ## Exemplary benchmark
 
@@ -24,6 +24,14 @@ Heatshrink (12,4), compressing 5614 bytes of text down to 2635 bytes on an ESP32
 | Original w/ USE_INDEX(*) | 3629992 | 4,5 % | 22,4x |
 
 (*) HEATSHRINK_USE_INDEX increases RAM requirement for compression by ~3x
+
+Obviously, YMMV as the possible performance gain also depends on the actual data being
+compressed; 'harder' to compress -> more potential performance gain.
+
+Note that heatshrink is based on LZSS compression, which means heatshrink alone can only
+compresses repeating sequences of bytes in a data stream. This makes it a reasonable choice
+for compressing text or HTML but not so much for analog signals or sensor readings in which
+even a small amount of noise may eliminate most or all repetitions of identical bytes.
 
 
 Heatshrink's original Readme below:
