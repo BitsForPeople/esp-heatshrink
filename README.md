@@ -29,9 +29,10 @@ Obviously, YMMV as the possible performance gain also depends on the actual data
 compressed; 'harder' to compress -> more potential performance gain.
 
 Note that heatshrink is based on LZSS compression, which means heatshrink alone can only
-compresses repeating sequences of bytes in a data stream. This makes it a reasonable choice
-for compressing text or HTML but not so much for analog signals or sensor readings in which
-even a small amount of noise may eliminate most or all repetitions of identical bytes.
+compress repeating sequences of bytes in a data stream. This makes it a reasonable choice
+for compressing text, HTML, or some types of bitmap images but not so much for analog signals,
+sensor readings, or photos, because even a small amount of noise may eliminate most or all
+repetitions of identical byte sequences.
 
 
 Heatshrink's original Readme below:
