@@ -14,14 +14,14 @@ by a factor of _a lot_.
 
 Heatshrink (12,4), compressing 5614 bytes of text down to 2635 bytes on an ESP32-S3:
 
-| Variant | CPU cycles | rel. CPU cycles | rel. Speed |
-|--|--|--|--|
-| Original | 81429230 | 100,0 % | 1,0x |
-| 32-bit | 61566318 | 75,6 % | 1,3x |
-| New search | 51254828 | 62,9 % | 1,6x |
-| Xtensa optimized | 34800036 | 42,7 % | 2,3x |
-| ESP32-S3 SIMD | 5703885 | 7,0 % | 14,3x |
-| Original w/ USE_INDEX(*) | 3629992 | 4,5 % | 22,4x |
+| Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
+|--|--|--|--|--|
+| Original | 81429230 | 339,3 ms | 100,0 % | 1,0 x |
+| 32-bit | 61566318 | 256,5 ms | 75,6 % | 1,3 x |
+| New search | 51254828 | 213,6 ms | 62,9 % | 1,6 x |
+| Xtensa optimized | 34800036 | 145,0 ms | 42,7 % | 2,3 x |
+| ESP32-S3 SIMD | 5703885 | 23,8 ms | 7,0 % | 14,3 x |
+| Original w/ USE_INDEX(*) | 3629992 | 15,1 ms | 4,5 % | 22,4 x |
 
 (*) HEATSHRINK_USE_INDEX increases RAM requirement for compression by ~3x
 
