@@ -1,5 +1,7 @@
 # heatshrink for ESP32
-This is a modification of the heatshrink data compression library intended for use on ESP32 MCUs.
+This is a modification of the heatshrink data compression library intended for use on ESP32 MCUs,
+and an experiment/proof-of-concept for the use of the ESP32-S3's SIMD instruction set ("Processor 
+Instruction Extensions", "PIE") in data compression.
 
 The original heatshrink is made into a component for use in ESP-IDF builds and speed-optimized for
 32 bit architectures like the ESP32s', including new and faster pattern-match search functions.
