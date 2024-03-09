@@ -1,12 +1,49 @@
 #pragma once
 #include <cstdint>
+#if __cplusplus > 201703L
 #include <span>
+#endif
 #include <type_traits>
 #include <algorithm>
 
 #include "hs_arch.hpp"
 
 namespace heatshrink {
+
+    #if __cpp_lib_span >= 202002L
+    using byte_span = std::span<const uint8_t>;
+    #else
+    class byte_span {
+        const uint8_t* m_data {nullptr};
+        std::size_t m_len {0};
+        public:
+        constexpr byte_span() noexcept = default;
+        constexpr byte_span(const byte_span&) noexcept = default;
+        constexpr byte_span(const uint8_t* const data, const std::size_t len) :
+            m_data {data},
+            m_len {len} {
+                
+            }
+
+        constexpr byte_span& operator =(const byte_span&) noexcept = default;
+
+        constexpr const uint8_t* data() const noexcept {
+            return m_data;
+        }
+
+        constexpr bool empty() const noexcept {
+            return m_len == 0;
+        }
+
+        constexpr std::size_t size() const noexcept {
+            return m_len;
+        }
+
+        constexpr std::size_t size_bytes() const noexcept {
+            return m_len;
+        }
+    };
+    #endif
 
     /**
      * @brief Optimized functions for locating substring ("pattern") matches.
@@ -388,10 +425,10 @@ namespace heatshrink {
                 }
             }
 
-            template<std::size_t N, std::size_t M>
-            static const uint8_t* find_pattern_scalar(const std::span<const uint8_t,M>& pattern, const std::span<const uint8_t,N>& data) {
-                return find_pattern_scalar(pattern.data(), pattern.size_bytes(), data.data(), data.size_bytes());
-            }
+            // template<std::size_t N, std::size_t M>
+            // static const uint8_t* find_pattern_scalar(const std::span<const uint8_t,M>& pattern, const std::span<const uint8_t,N>& data) {
+            //     return find_pattern_scalar(pattern.data(), pattern.size_bytes(), data.data(), data.size_bytes());
+            // }
 
             /**
              * @brief Searches \p data for the first occurence of a \p pattern.
@@ -550,11 +587,6 @@ namespace heatshrink {
                 
             }
 
-            template<std::size_t N, std::size_t M>
-            static const uint8_t* find_pattern(const std::span<const uint8_t,M>& pattern, const std::span<const uint8_t,N>& data) {
-                return find_pattern(pattern.data(), pattern.size_bytes(), data.data(), data.size_bytes());
-            }
-
             /**
              * @brief Searches \p data for the longest prefix of \p pattern that can be found.
              * 
@@ -564,7 +596,7 @@ namespace heatshrink {
              * @param dataLen 
              * @return a std::span of the match in data found, or an empty std::span if no prefix was found.
              */
-            static std::span<const uint8_t> find_longest_match(
+            static byte_span find_longest_match(
                 const uint8_t* const pattern,
                 const uint32_t patLen,
                 const uint8_t* data,
@@ -594,18 +626,8 @@ namespace heatshrink {
                     } while(match && searchLen <= patLen && searchLen <= dataLen);
                 }
 
-                return std::span<const uint8_t> {bestMatch,matchLen};
+                return byte_span {bestMatch,matchLen};
 
-            }
-
-            template<std::size_t N, std::size_t M>
-            static const std::span<const uint8_t> find_longest_match(const std::span<const uint8_t,N>& pattern, const std::span<const uint8_t,M>& data) {
-                return find_longest_match(
-                    pattern.data(),
-                    pattern.size_bytes(),
-                    data.data(),
-                    data.size_bytes()
-                );
             }
 
     };

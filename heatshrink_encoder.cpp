@@ -4,12 +4,12 @@
 #include "heatshrink_encoder.h"
 
 #if HEATSHRINK_NEW_SEARCH
-#include "hs_search.hpp"
-
 #if HEATSHRINK_USE_INDEX
-#warning HEATSHRINK_NEW_SEARCH is incompatible with HEATSHRINK_USE_INDEX. Disabling HEATSHRINK_USE_INDEX.
-#undef  HEATSHRINK_USE_INDEX
-#define HEATSHRINK_USE_INDEX 0
+    #warning HEATSHRINK_NEW_SEARCH is incompatible with HEATSHRINK_USE_INDEX. Disabling HEATSHRINK_NEW_SEARCH.
+    #undef  HEATSHRINK_NEW_SEARCH
+    #define HEATSHRINK_NEW_SEARCH 0
+#else
+    #include "hs_search.hpp"
 #endif // HEATSHRINK_USE_INDEX
 
 #endif // HEATSHRINK_NEW_SEARCH
@@ -23,8 +23,10 @@ extern "C"
 
 #if HEATSHRINK_32BIT
 typedef uint32_t uint_t;
+typedef int32_t  int_t;
 #else
 typedef uint16_t uint_t;
+typedef int16_t  int_t;
 #endif
 
 typedef enum {
@@ -69,6 +71,8 @@ static const char *state_names[] = {
 #define ASSERT(X) /* no-op */
 #endif
 
+constexpr uint8_t BIT_INDEX_INIT = 0x0; // 0x80
+
 // Encoder flags
 enum {
     FLAG_IS_FINISHING = 0x01,
@@ -86,8 +90,8 @@ static uint_t get_input_offset(heatshrink_encoder *hse);
 static uint_t get_input_buffer_size(heatshrink_encoder *hse);
 static uint_t get_lookahead_size(heatshrink_encoder *hse);
 static void add_tag_bit(heatshrink_encoder *hse, output_info *oi, /* u8 */ uint_t tag);
-static int can_take_byte(output_info *oi);
-static int is_finishing(heatshrink_encoder *hse);
+static bool can_take_byte(output_info *oi);
+static bool is_finishing(heatshrink_encoder *hse);
 static void save_backlog(heatshrink_encoder *hse);
 
 /* Push COUNT (max 8) bits to the output buffer, which has room. */
@@ -152,7 +156,7 @@ void heatshrink_encoder_reset(heatshrink_encoder *hse) {
     hse->state = HSES_NOT_FULL;
     hse->match_scan_index = 0;
     hse->flags = 0;
-    hse->bit_index = 0x80;
+    hse->bit_index = BIT_INDEX_INIT;
     hse->current_byte = 0x00;
     hse->match_length = 0;
 
@@ -219,10 +223,10 @@ static HSE_state st_flush_bit_buffer(heatshrink_encoder *hse,
 
 HSE_poll_res heatshrink_encoder_poll(heatshrink_encoder *hse,
         uint8_t *out_buf, size_t out_buf_size, size_t *output_size) {
-    if ((hse == NULL) || (out_buf == NULL) || (output_size == NULL)) {
+    if ((hse == NULL) || (out_buf == NULL) || (output_size == NULL)) [[unlikely]] {
         return HSER_POLL_ERROR_NULL;
     }
-    if (out_buf_size == 0) {
+    if (out_buf_size == 0) [[unlikely]] {
         LOG("-- MISUSE: output buffer size is 0\n");
         return HSER_POLL_ERROR_MISUSE;
     }
@@ -398,7 +402,7 @@ static HSE_state st_save_backlog(heatshrink_encoder *hse) {
 
 static HSE_state st_flush_bit_buffer(heatshrink_encoder *hse,
         output_info *oi) {
-    if (hse->bit_index == 0x80) {
+    if (hse->bit_index == BIT_INDEX_INIT) {
         LOG("-- done!\n");
         return HSES_DONE;
     } else if (can_take_byte(oi)) {
@@ -460,7 +464,7 @@ static void do_indexing(heatshrink_encoder *hse) {
 
     for (uint_t i=0; i<end; i++) {
         /* u8 */ uint_t v = data[i];
-        int16_t lv = last[v];
+        int_t lv = last[v];
         index[i] = lv;
         last[v] = i;
     }
@@ -469,21 +473,14 @@ static void do_indexing(heatshrink_encoder *hse) {
 #endif
 }
 
-static int is_finishing(heatshrink_encoder *hse) {
-    return hse->flags & FLAG_IS_FINISHING;
+static bool is_finishing(heatshrink_encoder *hse) {
+    return (hse->flags & FLAG_IS_FINISHING) != 0;
 }
 
-static int can_take_byte(output_info *oi) {
-    return *oi->output_size < oi->buf_size;
+static bool can_take_byte(output_info *oi) {
+    return *(oi->output_size) < oi->buf_size;
 }
 
-static inline bool bitcntLE(const uint_t bytes, const uint_t bits) {
-    if constexpr (sizeof(uint_t) > 2) {
-        return (bytes*8) <= bits;
-    } else {
-        return bytes <= (bits/8);
-    }
-}
 
 /* Return the longest match for the bytes at buf[end:end+maxlen] between
  * buf[start] and buf[end-1]. If no match is found, return -1. */
@@ -495,9 +492,9 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
 #if HEATSHRINK_NEW_SEARCH
     const size_t break_even_point =
       (1 + HEATSHRINK_ENCODER_WINDOW_BITS(hse) +
-          HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse));    
+          HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse)) / 8;    
 
-    if(maxlen <= (break_even_point/8) || (end <= start)) [[unlikely]] {
+    if(maxlen <= break_even_point || (end <= start)) [[unlikely]] {
         return MATCH_NOT_FOUND;
     } 
 
@@ -509,9 +506,11 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
         const uint8_t* const data = buf+start;
         const uint8_t* const pattern = buf+end;
         const uint32_t dataLen = end-start;
-        const std::span<const uint8_t> lm = heatshrink::Locator::find_longest_match(pattern,maxlen,data,dataLen);
+        const heatshrink::byte_span lm = heatshrink::Locator::find_longest_match(pattern,maxlen,data,dataLen);
 
-        if(!lm.empty()) {
+        if(lm.empty()) {
+            return MATCH_NOT_FOUND;
+        } else {
             match_index = lm.data()-buf;
             match_maxlen = lm.size_bytes();
         }
@@ -528,9 +527,9 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
     const uint8_t* const needlepoint = &buf[end];
 #if HEATSHRINK_USE_INDEX
     struct hs_index *hsi = HEATSHRINK_ENCODER_INDEX(hse);
-    int16_t pos = hsi->index[end];
+    int_t pos = hsi->index[end];
 
-    while (pos - (int16_t)start >= 0) {
+    while(pos >= (int_t)start) {
         const uint8_t * const pospoint = &buf[pos];
         len = 0;
 
@@ -554,13 +553,9 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
         pos = hsi->index[pos];
     }
 #else    
-#if HEATSHRINK_32BIT
+
     const uint8_t* const sp = buf + start;
     for(const uint8_t* pospoint = buf + end - 1; pospoint >= sp; --pospoint) {
-#else
-    for (int16_t pos=end - 1; (pos - (int16_t)start) >= 0; pos--) {
-        const uint8_t * const pospoint = &buf[pos];
-#endif
         if ((pospoint[0] == needlepoint[0]) && 
             (pospoint[match_maxlen] == needlepoint[match_maxlen])) {
             for (len=1; len<maxlen; len++) {
@@ -583,14 +578,14 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
     
     const size_t break_even_point =
       (1 + HEATSHRINK_ENCODER_WINDOW_BITS(hse) +
-          HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse));
+          HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse)) / 8;
 
 #endif
     /* Instead of comparing break_even_point against 8*match_maxlen,
      * compare match_maxlen against break_even_point/8 to avoid
      * overflow. Since MIN_WINDOW_BITS and MIN_LOOKAHEAD_BITS are 4 and
      * 3, respectively, break_even_point/8 will always be at least 1. */
-    if (match_maxlen > (break_even_point / 8)) {
+    if (match_maxlen > break_even_point) {
         LOG("-- best match: %u bytes at -%u\n",
             match_maxlen, end - match_index);
         *match_length = match_maxlen;
@@ -601,20 +596,17 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
 }
 
 static /* u8 */ uint_t push_outgoing_bits(heatshrink_encoder *hse, output_info *oi) {
-    /* u8 */ uint_t count = 0;
-    /* u8 */ uint_t bits = 0;
-    if (hse->outgoing_bits_count > 8) {
-        count = 8;
-        bits = hse->outgoing_bits >> (hse->outgoing_bits_count - 8);
-    } else {
-        count = hse->outgoing_bits_count;
-        bits = hse->outgoing_bits;
-    }
-
-    if (count > 0) {
+    /* u8 */ uint_t count = hse->outgoing_bits_count;
+    if(count != 0) {
+        hse->outgoing_bits_count = 0;
+        uint_t bits = hse->outgoing_bits;
+        if (count > 8) {
+            bits = bits >> (count - 8);
+            hse->outgoing_bits_count = count-8;
+            count = 8;
+        } 
         LOG("-- pushing %d outgoing bits: 0x%02x\n", count, bits);
         push_bits(hse, count, bits, oi);
-        hse->outgoing_bits_count -= count;
     }
     return count;
 }
@@ -626,24 +618,41 @@ static void push_bits(heatshrink_encoder *hse, /* u8 */ uint_t count, /* u8 */ u
     ASSERT(count <= 8);
     LOG("++ push_bits: %d bits, input of 0x%02x\n", count, bits);
 
-    /* If adding a whole byte and at the start of a new output byte,
-     * just push it through whole and skip the bit IO loop. */
-    if (count == 8 && hse->bit_index == 0x80) {
-        oi->buf[(*oi->output_size)++] = bits;
+    static_assert(BIT_INDEX_INIT == 0 || BIT_INDEX_INIT == 0x80);
+
+    if constexpr (BIT_INDEX_INIT == 0) {
+        uint_t bit = hse->bit_index;
+
+        uint_t out = hse->current_byte;
+        out = (out << count) | (bits & ((1<<count)-1));
+        bit += count;
+        if(bit >= 8) {
+            oi->buf[(*oi->output_size)++] = out >> (bit-8);
+            bit -= 8;
+        }
+        hse->bit_index = bit;
+        hse->current_byte = out;
+
     } else {
-        for (int i=count - 1; i>=0; i--) {
-            bool bit = bits & (1 << i);
-            if (bit) { hse->current_byte |= hse->bit_index; }
-            if (0) {
-                LOG("  -- setting bit %d at bit index 0x%02x, byte => 0x%02x\n",
-                    bit ? 1 : 0, hse->bit_index, hse->current_byte);
-            }
-            hse->bit_index >>= 1;
-            if (hse->bit_index == 0x00) {
-                hse->bit_index = 0x80;
-                LOG(" > pushing byte 0x%02x\n", hse->current_byte);
-                oi->buf[(*oi->output_size)++] = hse->current_byte;
-                hse->current_byte = 0x00;
+        /* If adding a whole byte and at the start of a new output byte,
+        * just push it through whole and skip the bit IO loop. */
+        if (count == 8 && hse->bit_index == BIT_INDEX_INIT) {
+            oi->buf[(*oi->output_size)++] = bits;
+        } else {
+            for (int i=count - 1; i>=0; i--) {
+                bool bit = bits & (1 << i);
+                if (bit) { hse->current_byte |= hse->bit_index; }
+                if (0) {
+                    LOG("  -- setting bit %d at bit index 0x%02x, byte => 0x%02x\n",
+                        bit ? 1 : 0, hse->bit_index, hse->current_byte);
+                }
+                hse->bit_index >>= 1;
+                if (hse->bit_index == 0x00) {
+                    hse->bit_index = BIT_INDEX_INIT;
+                    LOG(" > pushing byte 0x%02x\n", hse->current_byte);
+                    oi->buf[(*oi->output_size)++] = hse->current_byte;
+                    hse->current_byte = 0x00;
+                }
             }
         }
     }
