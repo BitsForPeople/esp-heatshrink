@@ -2,6 +2,9 @@
 #include <string.h>
 #include "heatshrink_decoder.h"
 
+// #include "esp_log.h"
+// static const char* const TAG = "HSD";
+
 /* States for the polling state machine. */
 typedef enum {
     HSDS_TAG_BIT,               /* tag bit */
@@ -89,14 +92,19 @@ void heatshrink_decoder_reset(heatshrink_decoder *hsd) {
     hsd->output_count = 0;
     hsd->output_index = 0;
     hsd->head_index = 0;
+
+// ESP_LOGI(TAG, "hsd: %" PRIu32 ", size: %" PRIu16, (uint32_t)hsd, hsd->input_size);
+
 }
 
 /* Copy SIZE bytes into the decoder's input buffer, if it will fit. */
 HSD_sink_res heatshrink_decoder_sink(heatshrink_decoder *hsd,
-        uint8_t *in_buf, size_t size, size_t *input_size) {
+        const uint8_t *in_buf, size_t size, size_t *input_size) {
     if ((hsd == NULL) || (in_buf == NULL) || (input_size == NULL)) {
         return HSDR_SINK_ERROR_NULL;
     }
+
+// ESP_LOGI(TAG, "hsd: %" PRIu32 ", size: %" PRIu16, (uint32_t)hsd, hsd->input_size);
 
     size_t rem = HEATSHRINK_DECODER_INPUT_BUFFER_SIZE(hsd) - hsd->input_size;
     if (rem == 0) {

@@ -1,10 +1,17 @@
 #ifndef HEATSHRINK_ENCODER_H
 #define HEATSHRINK_ENCODER_H
 
+
+
 #include <stdint.h>
 #include <stddef.h>
 #include "heatshrink_common.h"
 #include "heatshrink_config.h"
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
 typedef enum {
     HSER_SINK_OK,               /* data sunk into input buffer */
@@ -94,7 +101,7 @@ void heatshrink_encoder_reset(heatshrink_encoder *hse);
  * INPUT_SIZE is set to the number of bytes actually sunk (in case a
  * buffer was filled.). */
 HSE_sink_res heatshrink_encoder_sink(heatshrink_encoder *hse,
-    uint8_t *in_buf, size_t size, size_t *input_size);
+    const uint8_t *in_buf, size_t size, size_t *input_size);
 
 /* Poll for output from the encoder, copying at most OUT_BUF_SIZE bytes into
  * OUT_BUF (setting *OUTPUT_SIZE to the actual amount copied). */
@@ -106,4 +113,8 @@ HSE_poll_res heatshrink_encoder_poll(heatshrink_encoder *hse,
  * call heatshrink_encoder_poll and repeat. */
 HSE_finish_res heatshrink_encoder_finish(heatshrink_encoder *hse);
 
+#endif
+
+#ifdef __cplusplus
+}
 #endif
