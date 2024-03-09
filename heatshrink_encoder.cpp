@@ -500,19 +500,21 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
     if(maxlen <= (break_even_point/8) || (end <= start)) [[unlikely]] {
         return MATCH_NOT_FOUND;
     } 
-    const uint8_t* const buf = hse->buffer; 
 
+    uint32_t match_maxlen = 0;
     uint32_t match_index = MATCH_NOT_FOUND; 
-    uint32_t match_maxlen = 1;
+    {
+        const uint8_t* const buf = hse->buffer; 
 
-    const uint8_t* const data = buf+start;
-    const uint8_t* const pattern = buf+end;
-    const uint32_t dataLen = end-start;
-    const std::span<const uint8_t> lm = heatshrink::Locator::find_longest_match(pattern,maxlen,data,dataLen);
-    match_maxlen = 0;
-    if(lm.data() != nullptr && lm.data() < pattern) {
-        match_index = lm.data()-buf;
-        match_maxlen = lm.size_bytes();
+        const uint8_t* const data = buf+start;
+        const uint8_t* const pattern = buf+end;
+        const uint32_t dataLen = end-start;
+        const std::span<const uint8_t> lm = heatshrink::Locator::find_longest_match(pattern,maxlen,data,dataLen);
+
+        if(!lm.empty()) {
+            match_index = lm.data()-buf;
+            match_maxlen = lm.size_bytes();
+        }
     }
 
 #else
@@ -656,93 +658,6 @@ static void push_literal_byte(heatshrink_encoder *hse, output_info *oi) {
     push_bits(hse, 8, c, oi);
 }
 
-// static void copy_short(void* dest, const void* src, const uint_t len) {
-//     if(len & 8) {
-//         ((uint32_t*)dest)[0] = ((const uint32_t*)src)[0];
-//         ((uint32_t*)dest)[1] = ((const uint32_t*)src)[1];
-//         dest = (uint8_t*)dest + 8;
-//         src = (const uint8_t*)src + 8;
-//     }
-//     if(len & 4) {
-//         ((uint32_t*)dest)[0] = ((const uint32_t*)src)[0];
-//         dest = (uint8_t*)dest + 4;
-//         src = (const uint8_t*)src + 4;
-//     }
-//     if(len & 2) {
-//         ((uint16_t*)dest)[0] = ((const uint16_t*)src)[0];
-//         dest = (uint8_t*)dest + 2;
-//         src = (const uint8_t*)src + 2;
-//     }
-//     if(len & 1) {
-//         ((uint8_t*)dest)[0] = ((const uint8_t*)src)[0];
-//         // dest = (uint8_t*)dest + 1;
-//         // src = (const uint8_t*)src + 1;
-//     }
-// }
-
-// static void mmove(void* dest, const void* src, uint_t len) {
-//     if constexpr (Arch::ESP32S3) {
-//         if(len == 0) [[unlikely]] {
-//             return;
-//         }
-
-//         {
-//             const uint32_t doff = (uintptr_t)dest & 0x0f;
-//             if(doff != 0) {
-//                 uint32_t _l = std::min(16-doff,(uint32_t)len);
-//                 len -= _l;
-//                 copy_short(dest,src,_l);
-//                 dest = (uint8_t*)dest + _l;
-//                 src = (const uint8_t*)src + _l;
-//                 // if(_l & 8) {
-//                 //     ((uint32_t*)dest)[0] = ((const uint32_t*)src)[0];
-//                 //     ((uint32_t*)dest)[1] = ((const uint32_t*)src)[1];
-//                 //     dest = (uint8_t*)dest + 8;
-//                 //     src = (const uint8_t*)src + 8;
-//                 // }
-//                 // if(_l & 4) {
-//                 //     ((uint32_t*)dest)[0] = ((const uint32_t*)src)[0];
-//                 //     dest = (uint8_t*)dest + 4;
-//                 //     src = (const uint8_t*)src + 4;
-//                 // }
-//                 // if(_l & 2) {
-//                 //     ((uint16_t*)dest)[0] = ((const uint16_t*)src)[0];
-//                 //     dest = (uint8_t*)dest + 2;
-//                 //     src = (const uint8_t*)src + 2;
-//                 // }
-//                 // if(_l & 1) {
-//                 //     ((uint8_t*)dest)[0] = ((const uint8_t*)src)[0];
-//                 //     dest = (uint8_t*)dest + 1;
-//                 //     src = (const uint8_t*)src + 1;
-//                 // }
-//                 if(len == 0) [[unlikely]] {
-//                     return;
-//                 }                
-//             }
-//         }
-//         {
-//             // assert( ((uintptr_t)dest % 16) == 0);
-//             uint32_t cnt = len/16;
-//             asm volatile (
-//                 "EE.LD.128.USAR.IP q0, %[src], 16" "\n"
-//                 "LOOPNEZ %[cnt], end_%=" "\n"
-//                     "EE.VLD.128.IP q1, %[src], 16" "\n"
-//                     "EE.SRC.Q.QUP q1, q0, q1" "\n"
-//                     "EE.VST.128.IP q1, %[dest], 16" "\n"
-//                 "end_%=:"
-//                 : [src] "+r" (src),
-//                   [dest] "+r" (dest)
-//                 : [cnt] "r" (cnt)
-//             );
-//             if((len % 16) != 0) {
-//                 copy_short(dest, (const uint8_t*)src - 16, len % 16);
-//             }
-//         }
-//     } else {
-//         memmove(dest,src,len);
-//     }
-// }
-
 static void save_backlog(heatshrink_encoder *hse) {
     size_t input_buf_sz = get_input_buffer_size(hse);
     
@@ -758,11 +673,6 @@ static void save_backlog(heatshrink_encoder *hse) {
     memmove(&hse->buffer[0],
         &hse->buffer[input_buf_sz - rem],
         shift_sz);
-    // ESP_LOGI(TAG, "Copying %lu bytes", shift_sz);
-
-    // mmove(&hse->buffer[0],
-    //     &hse->buffer[input_buf_sz - rem],
-    //     shift_sz);    
         
     hse->match_scan_index = 0;
     hse->input_size -= input_buf_sz - rem;

@@ -8,91 +8,70 @@
 
 namespace heatshrink {
 
+    /**
+     * @brief Optimized functions for locating substring ("pattern") matches.
+     * 
+     * These are heatshrink-specific versions because for heatshrink a match only needs
+     * to \e start inside the given region of memory ("data") and may extend beyond that.
+     * 
+     */
     class Locator {
         private:
-        // We multiply (mac) this with itself, then mac the values at all even
-        // positions again which makes the even positions 'worth' 2x as much,
-        // so we effectively get
-        // {2*(128*128),(128*128),2*(64*64),(64*64),...,2*(1*1),(1*1)}, i.e.
-        // {(1<<15),(1<<14),(1<<13),...,(1<<1),(1<<0)} as desired.
-        alignas(16) static constexpr uint8_t POS_U8[16] {
-            128,128,64,64,32,32,16,16,8,8,4,4,2,2,1,1,
-        };
+            // We multiply (mac) this vector with itself, then mac the values at all
+            // even positions again which makes the even positions 'worth' 2x as much,
+            // so we effectively get an 8x16 mac with
+            // {2*(128*128),(128*128),2*(64*64),(64*64),...,2*(1*1),(1*1)}, i.e.
+            // {(1<<15),(1<<14),(1<<13),...,(1<<1),(1<<0)} as desired.        
+            /**
+             * @brief Vector of \c uint8_t used for extracting match positions when
+             * using ESP32-S3 SIMD.
+             */
+            alignas(16) static constexpr uint8_t POS_U8[16] {
+                128,128,64,64,32,32,16,16,8,8,4,4,2,2,1,1,
+            };
 
 
-    // struct u128 {
-    //     uint64_t d[2];
-    //     constexpr bool operator ==(const u128& other) const noexcept = default;
-    // };
-
-    // // template<typename T>
-    // // requires(sizeof(T) <= sizeof(uint64_t))
-    // // static constexpr bool _cmp(const uint8_t* &a, const uint8_t* &b, const uint8_t* const end){
-    // //     if (a <= (end-sizeof(T))) {
-    // //         if(*(const T*)a == *(const T*)b) {
-    // //             a += sizeof(T);
-    // //             b += sizeof(T);
-    // //             return true;
-    // //         }
-    // //     }
-    // //     return false;
-    // // } 
-
-
-    // template<typename T>
-    // // requires(sizeof(T) > sizeof(uint64_t))
-    // static constexpr bool _cmp(const uint8_t* &a, const uint8_t* &b, const uint8_t* const end) noexcept {
-    //     if (a <= (end-sizeof(T))) [[likely]] {
-    //         if(*(const T*)a == *(const T*)b) [[likely]] {
-    //             a += sizeof(T);
-    //             b += sizeof(T);
-    //             return true;
-    //         }
-    //     }
-    //     return false;
-    // } 
-
-    // template<typename T>
-    // static void _c(const uint8_t* &a, const uint8_t* &b) noexcept {
-    //     if(*(const T*)a == *(const T*)b) [[likely]] {
-    //         a += sizeof(T);
-    //         b += sizeof(T);
-    //     }
-    // }
-
-        static uint32_t subword_match_len(const void* a, const void* b) noexcept {
-            if(((const uint16_t*)a)[0] == ((const uint16_t*)b)[0]) {
-                if(((const uint8_t*)a)[2] != ((const uint8_t*)b)[2]) {
-                    return 2;
+            static uint32_t subword_match_len(const void* a, const void* b) noexcept {
+                if(((const uint16_t*)a)[0] == ((const uint16_t*)b)[0]) {
+                    if(((const uint8_t*)a)[2] != ((const uint8_t*)b)[2]) {
+                        return 2;
+                    } else {
+                        return 3;
+                    }
                 } else {
-                    return 3;
+                    if(((const uint8_t*)a)[0] == ((const uint8_t*)b)[0]) {
+                        return 1;
+                    } else {
+                        return 0;
+                    }
                 }
-            } else {
-                if(((const uint8_t*)a)[0] == ((const uint8_t*)b)[0]) {
-                    return 1;
-                } else {
-                    return 0;
-                }
+                // const uint16_t* pa = (const uint16_t*)a;
+                // const uint16_t* pb = (const uint16_t*)b;
+                // uint32_t x = (pa[0] == pb[0]) << 1;
+                // x += a[x] == b[x];
+                // return x;
             }
-            // const uint16_t* pa = (const uint16_t*)a;
-            // const uint16_t* pb = (const uint16_t*)b;
-            // uint32_t x = (pa[0] == pb[0]) << 1;
-            // x += a[x] == b[x];
-            // return x;
-        }
 
-         template<int32_t INC, typename T>
-        static void __attribute__((always_inline)) incptr(T*& ptr) {
-            ptr = (T*)(((uintptr_t)ptr) + INC);
-        }
+            template<int32_t INC, typename T>
+            static void __attribute__((always_inline)) incptr(T*& ptr) {
+                ptr = (T*)(((uintptr_t)ptr) + INC);
+            }
 
             template<typename T>
-            static T as(const void* const ptr) {
+            static T __attribute__((always_inline)) as(const void* const ptr) {
                 return *reinterpret_cast<const T*>(ptr);
             }
 
-            // patLen <= sizeof(uint32_t)!
-            static const uint8_t* /*__attribute__((noinline))*/ find_pattern_short_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
+            /**
+             * @brief Scalar pattern search for patterns <= sizeof(uint32_t) bytes in length.
+             * 
+             * @param pattern 
+             * @param patLen must be <= sizeof(uint32_t)
+             * @param data 
+             * @param dataLen 
+             * @return position of the first match found, or \c nullptr if none found. 
+             */
+            static const uint8_t* find_pattern_short_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
 
                 const uint8_t* const end = data + dataLen;
                 if(patLen > sizeof(uint16_t)) {            
@@ -184,10 +163,17 @@ namespace heatshrink {
                 return (data < end) ? data : nullptr;
             }
 
-            // This version limits only the _start_ of a match to be within data, as heatshrink does it.
-            template<typename W = uint32_t>
-            static const uint8_t* /* __attribute__((noinline)) */ find_pattern_t_scalar(const uint8_t* pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
-                using T = std::make_unsigned_t<W>;
+            /**
+             * @brief Scalar pattern search for patterns > sizeof(uint32_t) bytes in length.
+             * 
+             * @param pattern 
+             * @param patLen must be >= sizeof(uint32_t)
+             * @param data 
+             * @param dataLen 
+             * @return position of the first match found, or \c nullptr if none found. 
+             */
+            static const uint8_t* find_pattern_long_scalar(const uint8_t* pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
+                using T = uint32_t;
                 constexpr uint32_t sw = sizeof(T);
 
 
@@ -196,8 +182,6 @@ namespace heatshrink {
                 const uint32_t f = as<T>(pattern);
                 const uint32_t l = as<T>(pattern + patLen - sw);
 
-                const uint32_t skipLen = 1; // Locator::getSkipLen<T>(pattern,patLen);
-
                 const uint8_t* const end = first + dataLen /*- (sw-1)*/;
 
                 const uint32_t cmpLen = patLen - std::min(patLen,2*sw);
@@ -205,7 +189,7 @@ namespace heatshrink {
                 do {
                     if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
                         uint32_t tmp = end-first;
-                        if constexpr (sizeof(W) == sizeof(uint32_t)) {
+                        if constexpr (sizeof(T) == sizeof(uint32_t)) {
                             asm (
                                 "LOOPNEZ %[tmp], end_%=" "\n"
                                     "L32I %[tmp], %[first], 0" "\n"
@@ -242,7 +226,7 @@ namespace heatshrink {
                                 [tmp] "+r" (tmp)
                                 : [f] "r" (f),
                                 [l] "r" (l),
-                                [bits] "i" (sizeof(W)*8)
+                                [bits] "i" (sizeof(T)*8)
                             );            
                         }
                     } else {
@@ -260,8 +244,8 @@ namespace heatshrink {
                         if(cmpLen == 0 || cmp(first+sw,pattern+sw,cmpLen) >= cmpLen) {
                             return first;
                         } else {
-                            first += skipLen;
-                            last += skipLen;
+                            ++first;
+                            ++last;
                         }
                     }
                 } while (first < end);
@@ -285,6 +269,10 @@ namespace heatshrink {
                 const uint8_t* const end = (const uint8_t*)d1 + len;
 
                 if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
+                    // Memory barrier for the compiler
+                    asm volatile (""::"m" (*(const uint8_t(*)[len])d1));
+                    asm volatile (""::"m" (*(const uint8_t(*)[len])d2));
+
                     {
                         uint32_t tmp1, tmp2;
                
@@ -363,36 +351,37 @@ namespace heatshrink {
 
                 } else {
                     {
-                        const uint8_t* const end32 = (const uint8_t*)d1 + (len & ~3);
-                        while ((const uint8_t*)d1 < end32 && as<uint32_t>(d1) == as<uint32_t>(d2)) {
+                        while (d1 < end && as<uint32_t>(d1) == as<uint32_t>(d2)) {
                             incptr<4>(d1);
                             incptr<4>(d2);
                         }
                     }
 
                     if(d1 < end) {
+                        // Find any common prefix in (d1+0)...(d1+sizeof(uint32_t)-1)
                         const uint32_t sml = subword_match_len(d1,d2);
                         return std::min(len, (const uint8_t*)d1-(end-len)+sml);
                     } else {
                         return len;
                     }                    
 
-                    // while((const uint8_t*)d1 < end && as<uint8_t>(d1) == as<uint8_t>(d2)) {
-                    //     incptr<1>(d1);
-                    //     incptr<1>(d2);
-                    // }
-
-                    // return (const uint8_t*)d1-(end-len);
-
                 }
 
             }
 
 
-
+            /**
+             * @brief Scalar, i.e. non-SIMD, pattern search.
+             * 
+             * @param pattern start of pattern to search for
+             * @param patLen length of pattern to search for
+             * @param data start of data to search
+             * @param dataLen length of data to search
+             * @return first start of pattern in data, or \c nullptr if not found
+             */
             static const uint8_t* find_pattern_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) {
                 if(patLen > sizeof(uint32_t)) {
-                    return find_pattern_t_scalar<uint32_t>(pattern, patLen, data, dataLen);
+                    return find_pattern_long_scalar(pattern, patLen, data, dataLen);
                 } else
                 {
                     return find_pattern_short_scalar(pattern,patLen, data, dataLen);
@@ -404,9 +393,17 @@ namespace heatshrink {
                 return find_pattern_scalar(pattern.data(), pattern.size_bytes(), data.data(), data.size_bytes());
             }
 
-
-            // This version limits only the _start_ of a match to be within data, as heatshrink does it.
-            static const uint8_t* /*__attribute__((noinline))*/ find_pattern(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) {
+            /**
+             * @brief Searches \p data for the first occurence of a \p pattern.
+             * On ESP32-S3 targets, this uses SIMD instructions; delegates to ::find_pattern_scalar() on other targets.
+             * 
+             * @param pattern start of pattern to search for
+             * @param patLen length of pattern to search for
+             * @param data start of data to search
+             * @param dataLen length of data to search
+             * @return first start of pattern in data, or \c nullptr if not found
+             */
+            static const uint8_t* find_pattern(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) {
 
                 if constexpr (Arch::ESP32S3) {
                     asm volatile (""::"m" (*(const uint8_t(*)[dataLen])data));
@@ -442,7 +439,7 @@ namespace heatshrink {
 
                         "EE.VLD.128.IP q2, %[last], 16" "\n"  
                         : [first] "+r" (first),
-                        [last] "+r" (last)
+                          [last] "+r" (last)
                     );      
 
                     const uint8_t* const pat1 = pattern+1;                
@@ -497,6 +494,8 @@ namespace heatshrink {
 
                             /* Yes, it takes no more than 7 instructions, plus the 'lookup table' from POS_U8 (in q7),
                              * to extract 16 bits from the 16 8-bit boolean results of a vector comparison.
+                             *
+                             * Seriously. This is the fastest way I could come up with.
                              */
                             asm volatile (
 
@@ -522,6 +521,7 @@ namespace heatshrink {
                             : 
                             );                
 
+                            // What we want is now in bits 15...0 of tmp
 
                             tmp = tmp << 16;
                             const uint8_t* s1 = first-48;
@@ -530,7 +530,7 @@ namespace heatshrink {
                                 {
                                     const uint32_t bits = __builtin_clz(tmp) + 1;
                                     s1 += bits;
-                                    tmp = tmp << (bits);
+                                    tmp = tmp << bits;
                                 }
                                 if(s1 > end) [[unlikely]] {
                                     // Found match begins beyond the end of data.
@@ -555,7 +555,16 @@ namespace heatshrink {
                 return find_pattern(pattern.data(), pattern.size_bytes(), data.data(), data.size_bytes());
             }
 
-            static std::span<const uint8_t> /* __attribute__((noinline)) */ find_longest_match(
+            /**
+             * @brief Searches \p data for the longest prefix of \p pattern that can be found.
+             * 
+             * @param pattern 
+             * @param patLen length of the pattern; must be >= 2
+             * @param data 
+             * @param dataLen 
+             * @return a std::span of the match in data found, or an empty std::span if no prefix was found.
+             */
+            static std::span<const uint8_t> find_longest_match(
                 const uint8_t* const pattern,
                 const uint32_t patLen,
                 const uint8_t* data,
@@ -573,6 +582,8 @@ namespace heatshrink {
                             bestMatch = match;
                             matchLen = searchLen;
                             if(searchLen < patLen) [[likely]] {
+                                // If the current match happens to extend beyond what we searched for,
+                                // we'll take that too.
                                 matchLen += cmp(pattern+searchLen, match+searchLen, patLen-searchLen);
                             }
                             dataLen -= match+1-data;
