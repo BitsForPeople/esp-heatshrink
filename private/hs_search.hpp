@@ -22,7 +22,7 @@ namespace heatshrink {
         constexpr byte_span(const uint8_t* const data, const std::size_t len) :
             m_data {data},
             m_len {len} {
-                
+
             }
 
         constexpr byte_span& operator =(const byte_span&) noexcept = default;
@@ -47,18 +47,25 @@ namespace heatshrink {
 
     /**
      * @brief Optimized functions for locating substring ("pattern") matches.
-     * 
+     *
      * These are heatshrink-specific versions because for heatshrink a match only needs
      * to \e start inside the given region of memory ("data") and may extend beyond that.
-     * 
+     *
      */
     class Locator {
         private:
-            // We multiply (mac) this vector with itself, then mac the values at all
-            // even positions again which makes the even positions 'worth' 2x as much,
-            // so we effectively get an 8x16 mac with
-            // {2*(128*128),(128*128),2*(64*64),(64*64),...,2*(1*1),(1*1)}, i.e.
-            // {(1<<15),(1<<14),(1<<13),...,(1<<1),(1<<0)} as desired.        
+            /*
+              We multiply (mac) this vector with itself, then mac the values at all
+              even positions again which makes the even positions 'worth' 2x as much,
+              so we effectively get an 8x16 mac with
+              {2*(128*128),(128*128),2*(64*64),(64*64),...,2*(1*1),(1*1)}, i.e.
+              {(1<<15),(1<<14),(1<<13),...,(1<<1),(1<<0)} as desired.
+
+              Positions in the vector are mapped to bits in descending order, the first
+              u8 to 1<<15, the last u8 to 1<<0. This is because the Xtensas have a 1-cycle
+              "count leading zeroes" (CLZ) instruction ("NSAU"), whereas a "count trailing
+              zeroes" (CTZ) or "find first set" (FFS) requires ~4 instructions.
+             */
             /**
              * @brief Vector of \c uint8_t used for extracting match positions when
              * using ESP32-S3 SIMD.
@@ -68,50 +75,86 @@ namespace heatshrink {
             };
 
 
+            /**
+             * @brief Under the precondition that *(uint32_t*)a != *(uint32_t*)b, returns the
+             * common prefix length of *a and *b in bytes (0...3)
+             *
+             * @param a
+             * @param b
+             * @return common prefix length of *a and *b in bytes (0...3)
+             */
             static uint32_t subword_match_len(const void* a, const void* b) noexcept {
-                if(((const uint16_t*)a)[0] == ((const uint16_t*)b)[0]) {
-                    if(((const uint8_t*)a)[2] != ((const uint8_t*)b)[2]) {
-                        return 2;
-                    } else {
-                        return 3;
-                    }
+                if constexpr (false && Arch::XTENSA) {
+                    // uint32_t tmp = (uint32_t)as<uint16_t>(a) - as<uint16_t>(b);
+                    // tmp = sizeof(uint16_t) * (1-std::min(tmp,(uint32_t)1));
+                    // tmp += 1-std::min((uint32_t)(p<uint8_t>(a)[tmp]) - p<uint8_t>(b)[tmp],(uint32_t)1);
+                    // return tmp;
+                    // Branchless, but slower on an ESP32-S3.
+                    uint32_t tmp1 = (uint32_t)as<uint16_t>(a) - as<uint16_t>(b);
+                    tmp1 = (tmp1 == 0) ? 2 : 0;
+                    uint32_t tmp2 = (uint32_t)(p<uint8_t>(a)[tmp1]) - p<uint8_t>(b)[tmp1];
+                    return tmp1 + ((tmp2 == 0) ? 1 : 0);
                 } else {
-                    if(((const uint8_t*)a)[0] == ((const uint8_t*)b)[0]) {
-                        return 1;
+                    if(as<uint16_t>(a) == as<uint16_t>(b)) {
+                        // First 2 bytes match
+                        if(p<uint8_t>(a)[2] == p<uint8_t>(b)[2]) {
+                            // Byte #3 also matches -> mismatch must be in byte #4
+                            return 3;
+                        } else {
+                            // Mismatch in byte #3
+                            return 2;
+                        }
                     } else {
-                        return 0;
+                        // Mismatch in the first two bytes
+                        if(p<uint8_t>(a)[0] == p<uint8_t>(b)[0]) {
+                            // Byte #1 matches -> mismatch must be in byte #2
+                            return 1;
+                        } else {
+                            // Mismatch in first byte
+                            return 0;
+                        }
                     }
                 }
                 // const uint16_t* pa = (const uint16_t*)a;
                 // const uint16_t* pb = (const uint16_t*)b;
                 // uint32_t x = (pa[0] == pb[0]) << 1;
-                // x += a[x] == b[x];
+                // x += ((const uint8_t*)a)[x] == ((const uint8_t*)b)[x];
                 // return x;
             }
 
             template<int32_t INC, typename T>
-            static void __attribute__((always_inline)) incptr(T*& ptr) {
+            static void __attribute__((always_inline)) incptr(T*& ptr) noexcept {
                 ptr = (T*)(((uintptr_t)ptr) + INC);
             }
 
             template<typename T>
-            static T __attribute__((always_inline)) as(const void* const ptr) {
+            static const T* p(const void* const ptr) noexcept {
+                return (const T*)ptr;
+            }
+
+            template<typename T, int32_t INC>
+            static const T* pplus(const void* const ptr) noexcept {
+                return (const T*)((uintptr_t)ptr + INC);
+            }
+
+            template<typename T>
+            static T __attribute__((always_inline)) as(const void* const ptr) noexcept {
                 return *reinterpret_cast<const T*>(ptr);
             }
 
             /**
              * @brief Scalar pattern search for patterns <= sizeof(uint32_t) bytes in length.
-             * 
-             * @param pattern 
+             *
+             * @param pattern
              * @param patLen must be <= sizeof(uint32_t)
-             * @param data 
-             * @param dataLen 
-             * @return position of the first match found, or \c nullptr if none found. 
+             * @param data
+             * @param dataLen
+             * @return start of the first match found in \p data, or \c nullptr if none found.
              */
             static const uint8_t* find_pattern_short_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
 
                 const uint8_t* const end = data + dataLen;
-                if(patLen > sizeof(uint16_t)) {            
+                if(patLen > sizeof(uint16_t)) {
                     if(patLen == sizeof(uint32_t)) {
                         const uint32_t v = as<uint32_t>(pattern);
                         if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
@@ -123,7 +166,7 @@ namespace heatshrink {
                                     "ADDI %[data], %[data], 1" "\n"
                                 "end_%=:"
                                 : [tmp] "+r" (tmp),
-                                [data] "+r" (data)
+                                  [data] "+r" (data)
                                 : [v] "r" (v)
                             );
                         } else {
@@ -146,14 +189,14 @@ namespace heatshrink {
                                     "ADDI %[data], %[data], 1" "\n"
                                 "end_%=:"
                                 : [tmp] "+r" (tmp),
-                                [data] "+r" (data)
+                                  [data] "+r" (data)
                                 : [v] "r" (v)
                             );
                         } else {
                             while(data < end && (as<uint32_t>(data) << 8) != v) {
                                 incptr<1>(data);
                             }
-                        }                    
+                        }
                     }
                 } else {
                     if(patLen == sizeof(uint16_t)) {
@@ -167,7 +210,7 @@ namespace heatshrink {
                                     "ADDI %[data], %[data], 1" "\n"
                                 "end_%=:"
                                 : [tmp] "+r" (tmp),
-                                [data] "+r" (data)
+                                  [data] "+r" (data)
                                 : [v] "r" (v)
                             );
                         } else {
@@ -187,7 +230,7 @@ namespace heatshrink {
                                     "ADDI %[data], %[data], 1" "\n"
                                 "end_%=:"
                                 : [tmp] "+r" (tmp),
-                                [data] "+r" (data)
+                                  [data] "+r" (data)
                                 : [v] "r" (v)
                             );
                         } else {
@@ -202,12 +245,12 @@ namespace heatshrink {
 
             /**
              * @brief Scalar pattern search for patterns > sizeof(uint32_t) bytes in length.
-             * 
-             * @param pattern 
+             *
+             * @param pattern
              * @param patLen must be >= sizeof(uint32_t)
-             * @param data 
-             * @param dataLen 
-             * @return position of the first match found, or \c nullptr if none found. 
+             * @param data
+             * @param dataLen
+             * @return start of the first match found in \p data, or \c nullptr if none found.
              */
             static const uint8_t* find_pattern_long_scalar(const uint8_t* pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
                 using T = uint32_t;
@@ -236,14 +279,15 @@ namespace heatshrink {
                                     "BEQ %[tmp], %[l], end_%=" "\n"
 
                                     "next_%=:" "\n"
+
                                     "ADDI %[first], %[first], 1" "\n"
                                     "ADDI %[last], %[last], 1" "\n"
                                 "end_%=:"
                                 : [first] "+r" (first),
-                                [last] "+r" (last),
-                                [tmp] "+r" (tmp)
+                                  [last] "+r" (last),
+                                  [tmp] "+r" (tmp)
                                 : [f] "r" (f),
-                                [l] "r" (l)
+                                  [l] "r" (l)
                             );
                         } else {
                             asm (
@@ -255,16 +299,17 @@ namespace heatshrink {
                                     "BEQ %[tmp], %[l], end_%=" "\n"
 
                                     "next_%=:" "\n"
+
                                     "ADDI %[first], %[first], 1" "\n"
                                     "ADDI %[last], %[last], 1" "\n"
                                 "end_%=:"
                                 : [first] "+r" (first),
-                                [last] "+r" (last),
-                                [tmp] "+r" (tmp)
+                                  [last] "+r" (last),
+                                  [tmp] "+r" (tmp)
                                 : [f] "r" (f),
-                                [l] "r" (l),
-                                [bits] "i" (sizeof(T)*8)
-                            );            
+                                  [l] "r" (l),
+                                  [bits] "i" (sizeof(T)*8)
+                            );
                         }
                     } else {
                         do {
@@ -278,7 +323,7 @@ namespace heatshrink {
                     }
 
                     if(first < end) {
-                        if(cmpLen == 0 || cmp(first+sw,pattern+sw,cmpLen) >= cmpLen) {
+                        if(cmpLen == 0 || cmp8(first+sw,pattern+sw,cmpLen) >= cmpLen) {
                             return first;
                         } else {
                             ++first;
@@ -292,95 +337,133 @@ namespace heatshrink {
         public:
 
             /**
-             * @brief Compare up to \p len bytes from \p d1 and \p d2 and return the length of 
+             * @brief Memory compare, like ::cmp(), but only compares single bytes in a loop.
+             * This is faster on average if a mismatch within the first few (~4-6 or so) bytes is likely.
+             *
+             * @param d1
+             * @param d2
+             * @param len must be >= 1
+             * @return uint32_t
+             */
+            static uint32_t cmp8(const void* d1, const void* d2, const uint32_t len) noexcept {
+                const uintptr_t start = (uintptr_t)d1;
+
+                if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
+
+                    // Memory barrier for the compiler
+                    asm volatile (""::"m" (*(const uint8_t(*)[len])d1));
+                    asm volatile (""::"m" (*(const uint8_t(*)[len])d2));
+
+                    uint32_t tmp1, tmp2;
+                    asm volatile (
+
+                        "LOOPNEZ %[cnt], end_%=" "\n"
+
+                            "L8UI %[tmp1], %[d1], 0" "\n"
+                            "L8UI %[tmp2], %[d2], 0" "\n"
+
+                            "BNE %[tmp1], %[tmp2], end_%=" "\n"
+
+                            "ADDI %[d1], %[d1], 1" "\n"
+                            "ADDI %[d2], %[d2], 1" "\n"
+
+                        "end_%=:"
+                        :
+                          [tmp1] "=r" (tmp1),
+                          [tmp2] "=r" (tmp2),
+                          [d1] "+r" (d1),
+                          [d2] "+r" (d2)
+                        :
+                          [cnt] "r" (len)
+                    );
+
+                } else {
+                    const uint8_t* const end = p<uint8_t>(d1) + len;
+                    do {
+                        if(as<uint8_t>(d1) != as<uint8_t>(d2)) {
+                            break;
+                        } else {
+                            incptr<1>(d1);
+                            incptr<1>(d2);
+                        }
+                    } while( d1 < end );
+                }
+
+                return (uintptr_t)d1-start;
+            }
+
+            /**
+             * @brief Compare up to \p len bytes from \p d1 and \p d2 and return the length of
              * the common prefix of both memory regions.
-             * 
+             *
              * @param d1 pointer to memory to compare against \p d2
              * @param d2 pointer to memory to compare against \p d1
              * @param len maximum number of bytes to compare
              * @return common prefix length of \p *d1 and \p *d2, i.e. the number of equal bytes
              * from the start of both memory regions; returns \p len if all bytes are equal.
              */
-            static uint32_t cmp(const void* d1, const void* d2, const uint32_t len) {
+            static uint32_t cmp(const void* d1, const void* d2, const uint32_t len) noexcept {
 
                 const uint8_t* const end = (const uint8_t*)d1 + len;
 
                 if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
+
                     // Memory barrier for the compiler
                     asm volatile (""::"m" (*(const uint8_t(*)[len])d1));
                     asm volatile (""::"m" (*(const uint8_t(*)[len])d2));
 
                     {
                         uint32_t tmp1, tmp2;
-               
-                        asm volatile (
 
-                            "L32I %[tmp1], %[d1], 0" "\n"
-                            "L32I %[tmp2], %[d2], 0" "\n"            
+                        // Start comparing in 4-byte chunks (32bit) until a mismatch is found.
+                        asm volatile (
 
                             "LOOPNEZ %[cnt], end_%=" "\n"
 
+                                "L32I %[tmp1], %[d1], 0" "\n"
+                                "L32I %[tmp2], %[d2], 0" "\n"
+
                                 "BNE %[tmp1], %[tmp2], end_%=" "\n"
 
-                                "L32I %[tmp1], %[d1], 4" "\n"
-
                                 "ADDI %[d1], %[d1], 4" "\n"
-
-                                "L32I %[tmp2], %[d2], 4" "\n"   
-
                                 "ADDI %[d2], %[d2], 4" "\n"
 
                             "end_%=:"
-                            : [tmp1] "=&r" (tmp1),
-                              [tmp2] "=&r" (tmp2),
+                            :
+                              [tmp1] "=r" (tmp1),
+                              [tmp2] "=r" (tmp2),
                               [d1] "+r" (d1),
                               [d2] "+r" (d2)
-                            : [cnt] "r" (len/4)
+                            :
+                              [cnt] "r" (len/4)
                         );
 
 
-
-                        // len = (uintptr_t)end-(uintptr_t)d1;                
-                    
-                        // if(d1 < end && tmp1 != tmp2) [[likely]] {
-                        // //     // Locate the first non-matching byte
-                        //     tmp1 = tmp1 ^ tmp2;
-                        // //     if(tmp1 != 0) [[likely]] {
-                        //         // Find first set:
-                        //         tmp1 = tmp1 & -tmp1;
-                        //         tmp1 = 31-__builtin_clz(tmp1);
-                                
-                        //         return ((uintptr_t)d1 + tmp1/8)-((uintptr_t)end-len);
-                        // //     }
-                        // }
-                        // return len;
                     }
 
                     {
+                        // Compare remaining data (0..3 bytes) byte-wise
                         uint32_t tmp1, tmp2;
                         asm volatile (
 
-                                "L8UI %[tmp1], %[d1], 0" "\n"
-                                "L8UI %[tmp2], %[d2], 0" "\n"            
-
                                 "LOOPNEZ %[cnt], end_%=" "\n"
+
+                                    "L8UI %[tmp1], %[d1], 0" "\n"
+                                    "L8UI %[tmp2], %[d2], 0" "\n"
 
                                     "BNE %[tmp1], %[tmp2], end_%=" "\n"
 
-                                    "L8UI %[tmp1], %[d1], 1" "\n"
-
                                     "ADDI %[d1], %[d1], 1" "\n"
-
-                                    "L8UI %[tmp2], %[d2], 1" "\n"   
-
                                     "ADDI %[d2], %[d2], 1" "\n"
 
                                 "end_%=:"
-                            : [tmp1] "=&r" (tmp1),
-                              [tmp2] "=&r" (tmp2),
+                            :
+                              [tmp1] "=r" (tmp1),
+                              [tmp2] "=r" (tmp2),
                               [d1] "+r" (d1),
                               [d2] "+r" (d2)
-                            : [cnt] "r" (end-(const uint8_t*)d1)
+                            :
+                              [cnt] "r" (end-(const uint8_t*)d1)
                         );
                     }
 
@@ -388,7 +471,8 @@ namespace heatshrink {
 
                 } else {
                     {
-                        while (d1 < end && as<uint32_t>(d1) == as<uint32_t>(d2)) {
+                        const void* const end32 = (const uint8_t*)d1 + (len & ~3);
+                        while (d1 < end32 && as<uint32_t>(d1) == as<uint32_t>(d2)) {
                             incptr<4>(d1);
                             incptr<4>(d2);
                         }
@@ -400,7 +484,7 @@ namespace heatshrink {
                         return std::min(len, (const uint8_t*)d1-(end-len)+sml);
                     } else {
                         return len;
-                    }                    
+                    }
 
                 }
 
@@ -409,7 +493,7 @@ namespace heatshrink {
 
             /**
              * @brief Scalar, i.e. non-SIMD, pattern search.
-             * 
+             *
              * @param pattern start of pattern to search for
              * @param patLen length of pattern to search for
              * @param data start of data to search
@@ -425,15 +509,12 @@ namespace heatshrink {
                 }
             }
 
-            // template<std::size_t N, std::size_t M>
-            // static const uint8_t* find_pattern_scalar(const std::span<const uint8_t,M>& pattern, const std::span<const uint8_t,N>& data) {
-            //     return find_pattern_scalar(pattern.data(), pattern.size_bytes(), data.data(), data.size_bytes());
-            // }
+
 
             /**
              * @brief Searches \p data for the first occurence of a \p pattern.
              * On ESP32-S3 targets, this uses SIMD instructions; delegates to ::find_pattern_scalar() on other targets.
-             * 
+             *
              * @param pattern start of pattern to search for
              * @param patLen length of pattern to search for
              * @param data start of data to search
@@ -443,21 +524,25 @@ namespace heatshrink {
             static const uint8_t* find_pattern(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) {
 
                 if constexpr (Arch::ESP32S3) {
+                    // Memory barrier for the compiler
                     asm volatile (""::"m" (*(const uint8_t(*)[dataLen])data));
                     asm volatile (""::"m" (*(const uint8_t(*)[patLen])pattern));
 
+                    // q7[n] := POS_U8[n]
                     asm volatile (
                         "LD.QR q7, %[bytes]" "\n"
                         :
                         : [bytes] "m" (POS_U8)
                     );
 
+                    // q4[n] := pattern[0]
                     asm volatile (
                         "EE.VLDBC.8 q4, %[first]"
                         :
                         : [first] "r" (pattern)
                     );
 
+                    // q5[n] := pattern[patLen-1]
                     asm volatile (
                         "EE.VLDBC.8 q5, %[last]"
                         :
@@ -465,27 +550,35 @@ namespace heatshrink {
                     );
 
 
+                    // Pointer to potential match on first byte of pattern:
                     const uint8_t* first = data;
-                    const uint8_t* const end = first + dataLen;     
+                    // Pointer to potential match on last byte of pattern:
                     const uint8_t* last = first + patLen - 1;
 
+                    const uint8_t* const end = first + dataLen;
 
+
+                    // Using (q1:q0) to load+align 'first' data,
+                    // (q3:q2) to load+align 'last' data
                     asm volatile (
                         "EE.VLD.128.IP q0, %[first], 16" "\n"
                         "EE.LD.128.USAR.IP q1, %[first], 16" "\n"
 
-                        "EE.VLD.128.IP q2, %[last], 16" "\n"  
+                        "EE.VLD.128.IP q2, %[last], 16" "\n"
                         : [first] "+r" (first),
                           [last] "+r" (last)
-                    );      
+                    );
 
-                    const uint8_t* const pat1 = pattern+1;                
+                    const uint8_t* const pat1 = pattern+1;
+                    // We won't need to compare the first and the last byte of pattern a second time.
                     const uint32_t cmpLen = patLen - std::min(patLen,(uint32_t)2);
 
+                    // 'first' is ahead by 32 bytes of where we are actually searching.
                     const uint8_t* const flimit = end + 32;
 
                     do {
 
+                        // Want at least one iteration while there is any data left.
                         uint32_t tmp = ((flimit - first) + 15) / 16;
                         asm volatile (
 
@@ -494,18 +587,21 @@ namespace heatshrink {
                             "LOOPNEZ %[tmp], end_%=" "\n"
 
                                 /* Align & compare data from 'first' */
-                                "EE.SRC.Q.QUP q1, q0, q1" "\n"    
+                                "EE.SRC.Q.QUP q1, q0, q1" "\n"
 
                                     // Pipelining: Load next data from 'last'
                                     "EE.LD.128.USAR.IP q3, %[last], 16" "\n"
 
+                                // q6[n] := first[n] == pattern[0]
                                 "EE.VCMP.EQ.S8 q6, q1, q4" "\n"
 
                                 /* Align & compare data from 'last' */
                                 "EE.SRC.Q.QUP q3, q2, q3" "\n"
+                                // q3[n] := last[n] == pattern[patLen-1]
                                 "EE.VCMP.EQ.S8 q3, q3, q5" "\n"
 
                                 // AND both comparison results
+                                // q6[n] := q6[n] && q3[n]
                                 "EE.ANDQ q6, q6, q3" "\n"
 
                                 // Fold:
@@ -522,7 +618,7 @@ namespace heatshrink {
                             : [first] "+r" (first),
                               [last] "+r" (last),
                               [tmp] "+r" (tmp)
-                            : 
+                            :
                         );
 
                         if(tmp) {
@@ -539,13 +635,14 @@ namespace heatshrink {
                                 "EE.ZERO.ACCX" "\n"
 
                                 // And position factor with comparison mask:
+                                // q6[n] := POS_U8[n] & q6[n]
                                 "EE.ANDQ q6, q7, q6" "\n"
 
                                 // MAC 1: MAC all (non-masked) elements:
                                 "EE.VMULAS.U8.ACCX q6, q6" "\n"
 
                                 // Extract only the even elements from q6, set the rest to 0.
-                                "EE.ZERO.Q q3" "\n" // Get zeroes to fill the gaps.                
+                                "EE.ZERO.Q q3" "\n" // Get zeroes to fill the gaps.
                                 "EE.VUNZIP.8 q6, q3" "\n"
 
                                 // MAC the even elements one more time:
@@ -554,9 +651,10 @@ namespace heatshrink {
                                 // Extract:
                                 "RUR.ACCX_0 %[tmp]" "\n"
 
-                            : [tmp] "=r" (tmp)
-                            : 
-                            );                
+                            :
+                                [tmp] "=r" (tmp)
+                            :
+                            );
 
                             // What we want is now in bits 15...0 of tmp
 
@@ -573,7 +671,7 @@ namespace heatshrink {
                                     // Found match begins beyond the end of data.
                                     return nullptr;
                                 }
-                                if(cmpLen == 0 || cmp(s1,pat1,cmpLen) >= cmpLen) {
+                                if(cmpLen == 0 || cmp8(s1,pat1,cmpLen) >= cmpLen) {
                                     return s1-1;
                                 }
                             } while(tmp != 0);
@@ -584,16 +682,16 @@ namespace heatshrink {
                 } else {
                     return find_pattern_scalar(pattern, patLen, data, dataLen);
                 }
-                
+
             }
 
             /**
              * @brief Searches \p data for the longest prefix of \p pattern that can be found.
-             * 
-             * @param pattern 
+             *
+             * @param pattern
              * @param patLen length of the pattern; must be >= 2
-             * @param data 
-             * @param dataLen 
+             * @param data
+             * @param dataLen
              * @return a std::span of the match in data found, or an empty std::span if no prefix was found.
              */
             static byte_span find_longest_match(
@@ -604,6 +702,8 @@ namespace heatshrink {
 
                 const uint8_t* bestMatch {nullptr};
                 uint32_t matchLen {0};
+
+                const uint8_t* const end = data + dataLen;
 
                 {
                     const uint8_t* match;
@@ -616,14 +716,14 @@ namespace heatshrink {
                             if(searchLen < patLen) [[likely]] {
                                 // If the current match happens to extend beyond what we searched for,
                                 // we'll take that too.
-                                matchLen += cmp(pattern+searchLen, match+searchLen, patLen-searchLen);
+                                matchLen += cmp8(pattern+searchLen, match+searchLen, patLen-searchLen);
                             }
                             dataLen -= match+1-data;
                             data = match+1;
-                            
+
                             searchLen = matchLen+1; // Next match must beat the current one.
                         }
-                    } while(match && searchLen <= patLen && searchLen <= dataLen);
+                    } while(match && searchLen <= patLen && data < end);
                 }
 
                 return byte_span {bestMatch,matchLen};
