@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <algorithm>
 #include "heatshrink_encoder.h"
 
 #if HEATSHRINK_NEW_SEARCH
@@ -518,7 +519,7 @@ static uint_t find_longest_match(heatshrink_encoder* const hse, uint_t start,
     LOG("-- scanning for match of buf[%u:%u] between buf[%u:%u] (max %u bytes)\n",
         end, end + maxlen, start, end + maxlen - 1, maxlen);
 
-#if HEATSHRINK_NEW_SEARCH // && HEATSHRINK_USE_INDEX == 0
+#if HEATSHRINK_NEW_SEARCH 
     const size_t break_even_point =
       (1 + HEATSHRINK_ENCODER_WINDOW_BITS(hse) +
           HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse)) / 8;

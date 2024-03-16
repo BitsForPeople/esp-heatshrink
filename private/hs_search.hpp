@@ -128,6 +128,11 @@ namespace heatshrink {
             }
 
             template<typename T>
+            static void __attribute__((always_inline)) incptr(T*& ptr, const int32_t inc) noexcept {
+                ptr = (T*)(((uintptr_t)ptr) + inc);
+            }            
+
+            template<typename T>
             static const T* p(const void* const ptr) noexcept {
                 return (const T*)ptr;
             }
@@ -151,7 +156,8 @@ namespace heatshrink {
              * @param dataLen
              * @return start of the first match found in \p data, or \c nullptr if none found.
              */
-            static const uint8_t* find_pattern_short_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
+            // For some reason, without noinline we get only about HALF overall speed. Needs investigation!
+            static const uint8_t* __attribute__((noinline)) find_pattern_short_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) noexcept {
 
                 const uint8_t* const end = data + dataLen;
                 if(patLen > sizeof(uint16_t)) {
@@ -252,7 +258,8 @@ namespace heatshrink {
              * @param dataLen
              * @return start of the first match found in \p data, or \c nullptr if none found.
              */
-            static const uint8_t* find_pattern_long_scalar(const uint8_t* pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) {
+            // For some reason, without noinline we get only about HALF overall speed. Needs investigation!
+            static const uint8_t* __attribute__((noinline)) find_pattern_long_scalar(const uint8_t* pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) noexcept {
                 using T = uint32_t;
                 constexpr uint32_t sw = sizeof(T);
 
@@ -440,6 +447,7 @@ namespace heatshrink {
 
 
                     }
+                    
 
                     {
                         // Compare remaining data (0..3 bytes) byte-wise
@@ -500,7 +508,7 @@ namespace heatshrink {
              * @param dataLen length of data to search
              * @return first start of pattern in data, or \c nullptr if not found
              */
-            static const uint8_t* find_pattern_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) {
+            static const uint8_t* find_pattern_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) noexcept {
                 if(patLen > sizeof(uint32_t)) {
                     return find_pattern_long_scalar(pattern, patLen, data, dataLen);
                 } else
@@ -521,7 +529,7 @@ namespace heatshrink {
              * @param dataLen length of data to search
              * @return first start of pattern in data, or \c nullptr if not found
              */
-            static const uint8_t* find_pattern(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) {
+            static const uint8_t* find_pattern(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) noexcept {
 
                 if constexpr (Arch::ESP32S3) {
                     // Memory barrier for the compiler
@@ -698,7 +706,7 @@ namespace heatshrink {
                 const uint8_t* const pattern,
                 const uint32_t patLen,
                 const uint8_t* data,
-                uint32_t dataLen) {
+                uint32_t dataLen) noexcept {
 
                 const uint8_t* bestMatch {nullptr};
                 uint32_t matchLen {0};
