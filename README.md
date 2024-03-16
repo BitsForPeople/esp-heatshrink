@@ -48,7 +48,7 @@ compressed; 'harder' to compress -> more potential performance gain.
 The original heatshrink encoder is in `heatshrink_encoder.c` (used if `HEATSHRINK_32BIT`
 is set to 0) to make it easy to build and compare variants vs. the original.
 
-`heatshrink_encoder.cpp` contains some optimizations and is built if `HEATSHRINK_32BIT`
+`heatshrink_encoder_32bit.cpp` contains some optimizations and is built if `HEATSHRINK_32BIT`
 is set to 1. The actual heavy lifting of this variant is done by the 32-bit/SIMD optimized
 search functions which live in `private/hs_search.hpp`.
 
