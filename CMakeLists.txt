@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED False)
 
 idf_component_register(
-    SRCS "heatshrink_encoder.cpp" "heatshrink_decoder.c"
+    SRCS "heatshrink_encoder.c" "heatshrink_encoder_32bit.cpp" "heatshrink_decoder.c"
     INCLUDE_DIRS "."
     PRIV_INCLUDE_DIRS "private"
 )

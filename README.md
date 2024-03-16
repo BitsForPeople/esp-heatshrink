@@ -12,23 +12,47 @@ Xtensa-based ESP32 MCUs (ESP32, ESP32-S3).
 On the **ESP32-S3**, the MCU's SIMD instructions ("PIE") are used which further speeds up compression
 by a factor of _a lot_.
 
-## Exemplary benchmark
+Use of the 32-bit optimized variant can be enabled/disabled by setting `HEATSHRINK_32BIT` to 1 or 0
+in `heatshrink_config.h`; then, if built via ESP-IDF, ESP32 optimizations are automatically
+enabled based on the build's target SoC, with plain C/C++ fallbacks in place for non-Xtensa platforms.
 
-Heatshrink (12,4), compressing 5614 bytes of text down to 2635 bytes on an ESP32-S3:
+## Exemplary benchmarks
+
+Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes on an ESP32-S3:
 
 | Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
-| Original | 81429230 | 339,3 ms | 100,0 % | 1,0 x |
-| 32-bit | 61566318 | 256,5 ms | 75,6 % | 1,3 x |
-| New search | 38912292 | 162,1 ms | 47,8 % | 2,1 x |
-| Xtensa optimized | 34543266 | 143,9 ms | 42,4 % | 2,4 x |
-| ESP32-S3 SIMD | 5248242 | 21,9 ms | 6,4 % | 15,5 x |
-| Original w/ USE_INDEX(*) | 3629992 | 15,1 ms | 4,5 % | 22,4 x |
+| Original (C) | 100829896 | 420,1 ms | 100,0 % | 1,0 x |
+| 32-bit, New Search (C/C++) | 38911824 | 162,1 ms | 38,6 % | 2,6 x |
+| Xtensa optimized (C/C++/inl. asm.) | 34488868 | 143,7 ms | 34,2 % | 2,9 x |
+| ESP32-S3 SIMD (C/C++/inl. asm.) | 5248242 | 21,9 ms | 5,2 % | 19,2 x |
+| Original w/ USE_INDEX(*) (C) | 3636812 | 15,2 ms | 3,6 % | 27,7 x |
+
+Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes on an ESP32-S3:
+
+| Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
+|--|--|--|--|--|
+| Original (C) | 27143074 | 113,1 ms | 100,0 % | 1,0 x |
+| 32-bit, New Search (C/C++) | 10981088 | 45,8 ms | 40,5 % | 2,5 x |
+| Xtensa optimized (C/C++/inl. asm.) | 9744568 | 40,6 ms | 35,9 % | 2,8 x |
+| ESP32-S3 SIMD (C/C++/inl. asm.) | 2000388 | 8,3 ms | 7,4 % | 13,6 x |
+| Original w/ USE_INDEX(*) (C) | 2044378 | 8,5 ms | 7,5 % | 13,3 x |
 
 (*) HEATSHRINK_USE_INDEX increases RAM requirement for compression by ~3x
 
 Obviously, YMMV as the possible performance gain also depends on the actual data being
 compressed; 'harder' to compress -> more potential performance gain.
+
+## Code
+
+The original heatshrink encoder is in `heatshrink_encoder.c` (used if `HEATSHRINK_32BIT`
+is set to 0) to make it easy to build and compare variants vs. the original.
+
+`heatshrink_encoder.cpp` contains some optimizations and is built if `HEATSHRINK_32BIT`
+is set to 1. The actual heavy lifting of this variant is done by the 32-bit/SIMD optimized
+search functions which live in `private/hs_search.hpp`.
+
+## Note
 
 Note that heatshrink is based on LZSS compression, which means heatshrink alone can only
 compress repeating sequences of bytes in a data stream. This makes it a reasonable choice

@@ -6,11 +6,8 @@
 #define HEATSHRINK_DYNAMIC_ALLOC 1
 #endif
 
-/* Should 32 bit variables be used for computations in the encoder? (Faster on 32 bit architectures.) */
+/* Should the (32-bit) optimized variant be built? (Faster on 32 bit architectures.) */
 #define HEATSHRINK_32BIT 1
-
-/* Should a (32 bit) optimized pattern search implementation be used? (Faster on 32 bit architectures.) */
-#define HEATSHRINK_NEW_SEARCH 1
 
 #if HEATSHRINK_DYNAMIC_ALLOC
     /* Optional replacement of malloc/free */
@@ -26,8 +23,8 @@
 /* Turn on logging for debugging. */
 #define HEATSHRINK_DEBUGGING_LOGS 0
 
-/* Use indexing for faster compression. (Increases RAM requirement by ~200%, cannot be used 
-   together with HEATSHRINK_NEW_SEARCH.) */
+/* Use indexing for faster compression. (Increases RAM requirement by ~200%, disables use
+   of the 32-bit search functions.) */
 #define HEATSHRINK_USE_INDEX 0
 
 #endif

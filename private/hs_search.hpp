@@ -637,6 +637,7 @@ namespace heatshrink {
                              * to extract 16 bits from the 16 8-bit boolean results of a vector comparison.
                              *
                              * Seriously. This is the fastest way I could come up with.
+                             * The S3's PIE has only ONE horizontal SIMD instruction (VMULAS.ACCX).
                              */
                             asm volatile (
 
@@ -655,6 +656,9 @@ namespace heatshrink {
 
                                 // MAC the even elements one more time:
                                 "EE.VMULAS.U8.ACCX q6, q6" "\n"
+
+                                // Stall the pipeline for 1 cycle.
+                                // Then continue:
 
                                 // Extract:
                                 "RUR.ACCX_0 %[tmp]" "\n"
@@ -700,7 +704,7 @@ namespace heatshrink {
              * @param patLen length of the pattern; must be >= 2
              * @param data
              * @param dataLen
-             * @return a std::span of the match in data found, or an empty std::span if no prefix was found.
+             * @return a std::span of the match found in data, or an empty std::span if no prefix was found.
              */
             static byte_span find_longest_match(
                 const uint8_t* const pattern,
