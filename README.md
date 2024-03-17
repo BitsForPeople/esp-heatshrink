@@ -44,7 +44,7 @@ Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
 
 Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes:
 
-| Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
+| Variant | CPU cycles | Time @ 160MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
 | Original (C) | 100778552 | 629,9 ms | 100,0 % | 1,0 x |
 | 32-bit, New Search (C/C++) | 54724768 | 342,0 ms | 54,3 % | 1,8 x |
@@ -52,7 +52,7 @@ Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes:
 
 Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
 
-| Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
+| Variant | CPU cycles | Time @ 160MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
 | Original (C) | 27101012 | 169,4 ms | 100,0 % | 1,0 x |
 | 32-bit, New Search (C/C++) | 14528170 | 90,8 ms | 53,6 % | 1,9 x |
