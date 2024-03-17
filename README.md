@@ -73,7 +73,8 @@ is set to 1. The actual heavy lifting of this variant is done by the 32-bit/SIMD
 search functions which live in `private/hs_search.hpp`.
 
 ## Note
-1) The 32-bit modifications require the target architecture to support unaligned 32-bit reads.
+1) The 32-bit modifications require the target architecture to support unaligned 32-bit reads
+from the memory buffer used by the encoder.
 2) Heatshrink is based on LZSS compression, which means heatshrink alone can only compress
 repeating sequences of bytes in a data stream. This makes it a reasonable choice for
 compressing text, HTML, or some types of bitmap images but not so much for analog signals,
