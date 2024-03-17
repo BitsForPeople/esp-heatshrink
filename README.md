@@ -18,7 +18,9 @@ enabled based on the build's target SoC, with plain C/C++ fallbacks in place for
 
 ## Exemplary benchmarks
 
-Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes on an ESP32-S3:
+### ESP32-S3 (Xtensa)
+
+Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes:
 
 | Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
@@ -28,7 +30,7 @@ Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes on an E
 | ESP32-S3 SIMD (C/C++/inl. asm.) | 5248242 | 21,9 ms | 5,2 % | 19,2 x |
 | Original w/ USE_INDEX(*) (C) | 3636812 | 15,2 ms | 3,6 % | 27,7 x |
 
-Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes on an ESP32-S3:
+Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
 
 | Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
@@ -37,6 +39,24 @@ Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes on an E
 | Xtensa optimized (C/C++/inl. asm.) | 9744568 | 40,6 ms | 35,9 % | 2,8 x |
 | ESP32-S3 SIMD (C/C++/inl. asm.) | 2000388 | 8,3 ms | 7,4 % | 13,6 x |
 | Original w/ USE_INDEX(*) (C) | 2044378 | 8,5 ms | 7,5 % | 13,3 x |
+
+### ESP32-C3 (RISC-V)
+
+Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes:
+
+| Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
+|--|--|--|--|--|
+| Original | 100778552 | 629,9 ms | 100,0 % | 1,0 x |
+| 32-bit, New Search | 54724768 | 342,0 ms | 54,3 % | 1,8 x |
+| Original w/ USE_INDEX(*) | 3495174 | 21,8 ms | 3,5 % | 28,8 x |
+
+Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
+
+| Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
+|--|--|--|--|--|
+| Original | 27101012 | 169,4 ms | 100,0 % | 1,0 x |
+| 32-bit, New Search | 14528170 | 90,8 ms | 53,6 % | 1,9 x |
+| Original w/ USE_INDEX(*) | 1997088 | 12,5 ms | 7,4 % | 13,6 x |
 
 (*) HEATSHRINK_USE_INDEX increases RAM requirement for compression by ~3x
 
