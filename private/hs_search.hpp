@@ -1,3 +1,20 @@
+/*
+
+    Copyright 2023, <https://github.com/BitsForPeople>
+     
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, bu
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <https://www.gnu.org/licenses/>.
+*/
 #pragma once
 #include <cstdint>
 #if __cplusplus > 201703L
@@ -323,21 +340,26 @@ namespace heatshrink {
                             if(f == as<T>(first) && l == as<T>(last)) {
                                 break;
                             } else {
-                                ++first;
-                                ++last;
+                                incptr<1>(first);
+                                incptr<1>(last);
                             }
                         } while(first < end);
+                        // while ( first < end && (f != *(const uint32_t*)(first) || l != *(const uint32_t*)(last))) {
+                        //     incptr<1>(first);
+                        //     incptr<1>(last);
+                        // } 
                     }
 
                     if(first < end) {
                         if(cmpLen == 0 || cmp8(first+sw,pattern+sw,cmpLen) >= cmpLen) {
                             return first;
                         } else {
-                            ++first;
-                            ++last;
+                            incptr<1>(first);
+                            incptr<1>(last);
                         }
                     }
                 } while (first < end);
+
                 return nullptr;
             }
 
@@ -489,7 +511,7 @@ namespace heatshrink {
                     if(d1 < end) {
                         // Find any common prefix in (d1+0)...(d1+sizeof(uint32_t)-1)
                         const uint32_t sml = subword_match_len(d1,d2);
-                        return std::min(len, (const uint8_t*)d1-(end-len)+sml);
+                        return std::min(len, (uint32_t)((const uint8_t*)d1-(end-len)+sml));
                     } else {
                         return len;
                     }
