@@ -25,6 +25,12 @@
 
 #include "hs_arch.hpp"
 
+// #include "probe.hpp"
+
+// namespace perf {
+//     extern Probe probe[4];
+// }
+
 namespace heatshrink {
 
     #if __cpp_lib_span >= 202002L
@@ -67,6 +73,14 @@ namespace heatshrink {
      *
      * These are heatshrink-specific versions because for heatshrink a match only needs
      * to \e start inside the given region of memory ("data") and may extend beyond that.
+     * 
+     * Unlike original heatshrink, these search functions do \e forward scans, returning the
+     * lowest-address match instead of the highest-address match. Backward scans may be a bit
+     * faster if recent data is more likely to contain a current byte sequence than not-so-recent
+     * data; and the offsets in the backreferences tend to be smaller values, which might be
+     * beneficial for subsequent entropy coding.
+     * However, using the S3's PIE to iterate in the backward direction would be somewhat clumsy,
+     * so ...
      *
      */
     class Locator {
@@ -101,52 +115,35 @@ namespace heatshrink {
              * @return common prefix length of *a and *b in bytes (0...3)
              */
             static uint32_t subword_match_len(const void* a, const void* b) noexcept {
-                if constexpr (false && Arch::XTENSA) {
-                    // uint32_t tmp = (uint32_t)as<uint16_t>(a) - as<uint16_t>(b);
-                    // tmp = sizeof(uint16_t) * (1-std::min(tmp,(uint32_t)1));
-                    // tmp += 1-std::min((uint32_t)(p<uint8_t>(a)[tmp]) - p<uint8_t>(b)[tmp],(uint32_t)1);
-                    // return tmp;
-                    // Branchless, but slower on an ESP32-S3.
-                    uint32_t tmp1 = (uint32_t)as<uint16_t>(a) - as<uint16_t>(b);
-                    tmp1 = (tmp1 == 0) ? 2 : 0;
-                    uint32_t tmp2 = (uint32_t)(p<uint8_t>(a)[tmp1]) - p<uint8_t>(b)[tmp1];
-                    return tmp1 + ((tmp2 == 0) ? 1 : 0);
-                } else {
-                    if(as<uint16_t>(a) == as<uint16_t>(b)) {
-                        // First 2 bytes match
-                        if(p<uint8_t>(a)[2] == p<uint8_t>(b)[2]) {
-                            // Byte #3 also matches -> mismatch must be in byte #4
-                            return 3;
-                        } else {
-                            // Mismatch in byte #3
-                            return 2;
-                        }
+                if(as<uint16_t>(a) == as<uint16_t>(b)) {
+                    // First 2 bytes match
+                    if(p<uint8_t>(a)[2] == p<uint8_t>(b)[2]) {
+                        // Byte #3 also matches
+                        return 3;
                     } else {
-                        // Mismatch in the first two bytes
-                        if(p<uint8_t>(a)[0] == p<uint8_t>(b)[0]) {
-                            // Byte #1 matches -> mismatch must be in byte #2
-                            return 1;
-                        } else {
-                            // Mismatch in first byte
-                            return 0;
-                        }
+                        // Mismatch in byte #3
+                        return 2;
+                    }
+                } else {
+                    // Mismatch in the first two bytes
+                    if(p<uint8_t>(a)[0] == p<uint8_t>(b)[0]) {
+                        // Byte #1 matches -> mismatch must be in byte #2
+                        return 1;
+                    } else {
+                        // Mismatch in first byte
+                        return 0;
                     }
                 }
-                // const uint16_t* pa = (const uint16_t*)a;
-                // const uint16_t* pb = (const uint16_t*)b;
-                // uint32_t x = (pa[0] == pb[0]) << 1;
-                // x += ((const uint8_t*)a)[x] == ((const uint8_t*)b)[x];
-                // return x;
             }
 
             template<int32_t INC, typename T>
             static void __attribute__((always_inline)) incptr(T*& ptr) noexcept {
-                ptr = (T*)(((uintptr_t)ptr) + INC);
+                ptr = (T*)(p<uint8_t>(ptr) + INC);
             }
 
             template<typename T>
             static void __attribute__((always_inline)) incptr(T*& ptr, const int32_t inc) noexcept {
-                ptr = (T*)(((uintptr_t)ptr) + inc);
+                ptr = (T*)(p<uint8_t>(ptr) + inc);
             }            
 
             template<typename T>
@@ -156,7 +153,7 @@ namespace heatshrink {
 
             template<typename T, int32_t INC>
             static const T* pplus(const void* const ptr) noexcept {
-                return (const T*)((uintptr_t)ptr + INC);
+                return (const T*)(p<uint8_t>(ptr) + INC);
             }
 
             template<typename T>
@@ -164,6 +161,83 @@ namespace heatshrink {
                 return *reinterpret_cast<const T*>(ptr);
             }
 
+            /**
+             * @brief Returns \p x rounded down to the next lower multiple of \p M.
+             * 
+             * @tparam M 
+             * @param x 
+             * @return greates integer multiple of \p M <= \p x
+             */
+            template<uint32_t M>
+            static uint32_t multof(const uint32_t x) noexcept {
+                static_assert(M!=0);
+                if constexpr (M==1) {
+                    return x;
+                } else
+                if constexpr ((M & (M-1)) == 0) {
+                    return x & ~(M-1);
+                } else {
+                    constexpr uint64_t OOM = (0x100000000llu / M);
+                    // return (x / M) * M;
+                    return (uint32_t)((x * OOM)>>32) * M;
+                }
+            }            
+
+            template<typename T, uint32_t M, uint32_t N = 0>
+            static bool __attribute__((always_inline)) unrolled_find(const uint8_t*& data, const uint32_t v) noexcept {
+                if(as<T>(data+N) != v) [[likely]] {
+                    if constexpr (N+1 < M) {
+                        return unrolled_find<T,M,N+1>(data,v);
+                    } else {
+                        return false;
+                    }
+                } else {
+                    incptr<N>(data);
+                    return true;
+                }
+            }
+
+            // template<uint32_t M, uint32_t N = 0>
+            // static bool __attribute__((always_inline)) unrolled_find_3(const uint8_t*& data, const uint32_t v) noexcept {
+            //     if((as<uint32_t>(data+N)<<8) != v) [[likely]] {
+            //         if constexpr (N+1 < M) {
+            //             return unrolled_find_3<M,N+1>(data,v);
+            //         } else {
+            //             return false;
+            //         }
+            //     } else {
+            //         incptr<N>(data);
+            //         return true;
+            //     }
+            // }
+
+            template<uint32_t M, uint32_t N = 0>
+            static bool __attribute__((always_inline)) unrolled_find_3(const uint8_t*& data, const uint32_t vl, const uint32_t vh) noexcept {
+                static_assert(N < M);
+                if constexpr (N % 2 == 0) {
+                    if((as<uint32_t>(data+N)<<8) != vl) [[likely]] {
+                        if constexpr (N+1 < M) {
+                            return unrolled_find_3<M,N+1>(data,vl,vh);
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        incptr<N>(data);
+                        return true;
+                    }
+                } else {
+                    if((as<uint32_t>(data+N-1)>>8) != vh) [[likely]] {
+                        if constexpr (N+1 < M) {
+                            return unrolled_find_3<M,N+1>(data,vl,vh);
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        incptr<N>(data);
+                        return true;
+                    }
+                }
+            }            
             /**
              * @brief Scalar pattern search for patterns <= sizeof(uint32_t) bytes in length.
              *
@@ -173,74 +247,89 @@ namespace heatshrink {
              * @param dataLen
              * @return start of the first match found in \p data, or \c nullptr if none found.
              */
-            // For some reason, without noinline we get only about HALF overall speed. Needs investigation!
+            // For some reason, when gcc inlines this, this DOUBLES the total processing time. Needs investigation!
             static const uint8_t* __attribute__((noinline)) find_pattern_short_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) noexcept {
-
                 const uint8_t* const end = data + dataLen;
                 if(patLen > sizeof(uint16_t)) {
+
                     if(patLen == sizeof(uint32_t)) {
+
                         const uint32_t v = as<uint32_t>(pattern);
-                        if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
-                            uint32_t tmp = dataLen;
-                            asm volatile (
-                                "LOOPNEZ %[tmp], end_%=" "\n"
-                                    "L32I %[tmp], %[data], 0" "\n"
-                                    "BEQ %[tmp], %[v], end_%=" "\n"
-                                    "ADDI %[data], %[data], 1" "\n"
-                                "end_%=:"
-                                : [tmp] "+r" (tmp),
-                                  [data] "+r" (data)
-                                : [v] "r" (v)
-                            );
-                        } else {
+
+                        constexpr uint32_t LOOP_UNROLL_FACTOR = 8;
+
+                        const uint8_t* const e8 = data + multof<LOOP_UNROLL_FACTOR>(dataLen);
+                        while(data < e8 && !unrolled_find<uint32_t,LOOP_UNROLL_FACTOR>(data,v)) [[likely]] {
+                            incptr<LOOP_UNROLL_FACTOR>(data);
+                        }
+
+                        if(data >= e8) { 
+                            // Nothing found so far.
                             while(data < end && as<uint32_t>(data) != v) {
                                 incptr<1>(data);
                             }
-                        }
+                        }                            
                     }
                     else
                     {
                         // assert patLen == 3
-                        const uint32_t v = as<uint32_t>(pattern) << 8;
-                        if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
-                            uint32_t tmp = dataLen;
-                            asm volatile (
-                                "LOOPNEZ %[tmp], end_%=" "\n"
-                                    "L32I %[tmp], %[data], 0" "\n"
-                                    "SLLI %[tmp], %[tmp], 8" "\n"
-                                    "BEQ %[tmp], %[v], end_%=" "\n"
-                                    "ADDI %[data], %[data], 1" "\n"
-                                "end_%=:"
-                                : [tmp] "+r" (tmp),
-                                  [data] "+r" (data)
-                                : [v] "r" (v)
-                            );
-                        } else {
-                            while(data < end && (as<uint32_t>(data) << 8) != v) {
+
+                        // perf::probe[3].enter();
+
+                        constexpr uint32_t LOOP_UNROLL_FACTOR = 8;
+
+                        const uint32_t vl = as<uint32_t>(pattern) << 8; 
+                        const uint32_t vh = vl >> 8;
+
+                        // Loop unrolled 8x.
+                        const uint8_t* const e8 = data + multof<LOOP_UNROLL_FACTOR>(dataLen);
+
+                        while(data < e8 && !unrolled_find_3<LOOP_UNROLL_FACTOR>(data,vl,vh)) [[likely]] {
+                            incptr<LOOP_UNROLL_FACTOR>(data);
+                        }
+                                                    
+                        if(data >= e8) { 
+                            // Nothing found so far.
+                            while(data < end && (as<uint32_t>(data) << 8) != vl) {
                                 incptr<1>(data);
                             }
-                        }
+                        } 
+
+                        // perf::probe[3].exit()
+                        //     .addItems(dataLen - (end-data));                                                       
                     }
+
                 } else {
+
+                    // assert patLen <= sizeof(uint16_t)
+
                     if(patLen == sizeof(uint16_t)) {
+
+                        // This is where ~50% of the total CPU time is spent!
+
                         const uint32_t v = as<uint16_t>(pattern);
-                        if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
-                            uint32_t tmp = dataLen;
-                            asm volatile (
-                                "LOOPNEZ %[tmp], end_%=" "\n"
-                                    "L16UI %[tmp], %[data], 0" "\n"
-                                    "BEQ %[tmp], %[v], end_%=" "\n"
-                                    "ADDI %[data], %[data], 1" "\n"
-                                "end_%=:"
-                                : [tmp] "+r" (tmp),
-                                  [data] "+r" (data)
-                                : [v] "r" (v)
-                            );
-                        } else {
+
+                        // perf::probe[2].enter();
+
+                        constexpr uint32_t LOOP_UNROLL_FACTOR = 8;
+
+                        // Loop unrolled 8x.
+                        const uint8_t* const e8 = data + multof<LOOP_UNROLL_FACTOR>(dataLen);
+
+                        while(data < e8 && !unrolled_find<uint16_t,LOOP_UNROLL_FACTOR>(data,v)) [[likely]] {
+                            incptr<LOOP_UNROLL_FACTOR>(data);
+                        }
+
+                        if(data >= e8) { 
+                            // Nothing found so far.
                             while(data < end && as<uint16_t>(data) != v) {
                                 incptr<1>(data);
                             }
                         }
+
+                        // perf::probe[2].exit()
+                        //     .addItems(dataLen - (end-data));
+
                     } else [[unlikely]] {
                         // assert patLen == 1
                         const uint32_t v = as<uint8_t>(pattern);
@@ -266,6 +355,22 @@ namespace heatshrink {
                 return (data < end) ? data : nullptr;
             }
 
+            // Unrolled loop generator for find_pattern_long_scalar.
+            template<uint32_t M, uint32_t N = 0>
+            static bool __attribute__((always_inline)) unrolled_comp_f_l(const uint8_t*& first, const uint8_t*& last, const uint32_t f, const uint32_t l) noexcept {
+                if(f != as<uint32_t>(first+N) || l != as<uint32_t>(last+N)) [[likely]] {
+                    if constexpr (N+1 < M) {
+                        return unrolled_comp_f_l<M,N+1>(first,last,f,l);
+                    } else {
+                        return false;
+                    }
+                } else {
+                    incptr<N>(first);
+                    incptr<N>(last);
+                    return true;
+                }
+            }
+
             /**
              * @brief Scalar pattern search for patterns > sizeof(uint32_t) bytes in length.
              *
@@ -275,10 +380,12 @@ namespace heatshrink {
              * @param dataLen
              * @return start of the first match found in \p data, or \c nullptr if none found.
              */
-            // For some reason, without noinline we get only about HALF overall speed. Needs investigation!
+            // For some reason, when gcc inlines this, this DOUBLES the total processing time. Needs investigation!
             static const uint8_t* __attribute__((noinline)) find_pattern_long_scalar(const uint8_t* pattern, const uint32_t patLen, const uint8_t* data, uint32_t dataLen) noexcept {
                 using T = uint32_t;
                 constexpr uint32_t sw = sizeof(T);
+
+                // perf::probe[1].enter();
 
 
                 const uint8_t* first = data;
@@ -286,72 +393,37 @@ namespace heatshrink {
                 const uint32_t f = as<T>(pattern);
                 const uint32_t l = as<T>(pattern + patLen - sw);
 
-                const uint8_t* const end = first + dataLen /*- (sw-1)*/;
+                const uint8_t* const end = first + dataLen;
 
                 const uint32_t cmpLen = patLen - std::min(patLen,2*sw);
 
                 do {
-                    if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
-                        uint32_t tmp = end-first;
-                        if constexpr (sizeof(T) == sizeof(uint32_t)) {
-                            asm (
-                                "LOOPNEZ %[tmp], end_%=" "\n"
-                                    "L32I %[tmp], %[first], 0" "\n"
-                                    "BNE %[tmp], %[f], next_%=" "\n"
-
-                                    "L32I %[tmp], %[last], 0" "\n"
-                                    "BEQ %[tmp], %[l], end_%=" "\n"
-
-                                    "next_%=:" "\n"
-
-                                    "ADDI %[first], %[first], 1" "\n"
-                                    "ADDI %[last], %[last], 1" "\n"
-                                "end_%=:"
-                                : [first] "+r" (first),
-                                  [last] "+r" (last),
-                                  [tmp] "+r" (tmp)
-                                : [f] "r" (f),
-                                  [l] "r" (l)
-                            );
-                        } else {
-                            asm (
-                                "LOOPNEZ %[tmp], end_%=" "\n"
-                                    "L%[bits]UI %[tmp], %[first], 0" "\n"
-                                    "BNE %[tmp], %[f], next_%=" "\n"
-
-                                    "L%[bits]UI %[tmp], %[last], 0" "\n"
-                                    "BEQ %[tmp], %[l], end_%=" "\n"
-
-                                    "next_%=:" "\n"
-
-                                    "ADDI %[first], %[first], 1" "\n"
-                                    "ADDI %[last], %[last], 1" "\n"
-                                "end_%=:"
-                                : [first] "+r" (first),
-                                  [last] "+r" (last),
-                                  [tmp] "+r" (tmp)
-                                : [f] "r" (f),
-                                  [l] "r" (l),
-                                  [bits] "i" (sizeof(T)*8)
-                            );
+                    {
+                        constexpr uint32_t LOOP_UNROLL_FACTOR = 8;
+                        const uint8_t* const end_unrolled = first + multof<LOOP_UNROLL_FACTOR>(end-first);
+                        while(first < end_unrolled && !unrolled_comp_f_l<LOOP_UNROLL_FACTOR>(first,last,f,l)) [[likely]] {
+                            incptr<LOOP_UNROLL_FACTOR>(first);
+                            incptr<LOOP_UNROLL_FACTOR>(last);
                         }
-                    } else {
-                        do {
-                            if(f == as<T>(first) && l == as<T>(last)) {
-                                break;
-                            } else {
-                                incptr<1>(first);
-                                incptr<1>(last);
-                            }
-                        } while(first < end);
-                        // while ( first < end && (f != *(const uint32_t*)(first) || l != *(const uint32_t*)(last))) {
-                        //     incptr<1>(first);
-                        //     incptr<1>(last);
-                        // } 
+
+                        if(first >= end_unrolled) {
+                            // Nothing found so far.
+                            while(first < end) {
+                                if(f == as<T>(first) && l == as<T>(last)) {
+                                    break;
+                                } else {
+                                    incptr<1>(first);
+                                    incptr<1>(last);
+                                }
+                            };
+                        }
                     }
 
                     if(first < end) {
                         if(cmpLen == 0 || cmp8(first+sw,pattern+sw,cmpLen) >= cmpLen) {
+
+                            // perf::probe[1].exit(first-data+1);
+
                             return first;
                         } else {
                             incptr<1>(first);
@@ -360,7 +432,24 @@ namespace heatshrink {
                     }
                 } while (first < end);
 
+                // perf::probe[1].exit(first-data);
+
                 return nullptr;
+            }
+
+            template<uint32_t M, uint32_t N = 0, typename P>
+            static bool __attribute__((always_inline)) unrolled_cmp8(const P*& d1, const P*& d2) noexcept {
+                if(*(p<uint8_t>(d1)+N) == *(p<uint8_t>(d2)+N)) [[likely]] {
+                    if constexpr(N+1 < M) {
+                        return unrolled_cmp8<M,N+1>(d1,d2);
+                    } else {
+                        return true;
+                    }
+                } else {
+                    incptr<N>(d1);
+                    incptr<N>(d2);
+                    return false;
+                }
             }
 
         public:
@@ -375,9 +464,9 @@ namespace heatshrink {
              * @return uint32_t
              */
             static uint32_t cmp8(const void* d1, const void* d2, const uint32_t len) noexcept {
-                const uintptr_t start = (uintptr_t)d1;
+                const uint8_t* const start = p<uint8_t>(d1);
 
-                if constexpr (Arch::XTENSA && Arch::XT_LOOP) {
+                if constexpr (false && Arch::XTENSA && Arch::XT_LOOP) {
 
                     // Memory barrier for the compiler
                     asm volatile (""::"m" (*(const uint8_t(*)[len])d1));
@@ -407,18 +496,34 @@ namespace heatshrink {
                     );
 
                 } else {
-                    const uint8_t* const end = p<uint8_t>(d1) + len;
-                    do {
-                        if(as<uint8_t>(d1) != as<uint8_t>(d2)) {
-                            break;
-                        } else {
+                    const uint8_t* const end = p<uint8_t>(d1) + len;                    
+                    
+                    // if(len >= 4) [[unlikely]] {
+                    //     const uint8_t* const e4 = p<uint8_t>(d1) + (len & ~3);
+                    //     do {
+                    //         if(unrolled_cmp8<4>(d1,d2)) [[likely]] {
+                    //             incptr<4>(d1);
+                    //             incptr<4>(d2);
+                    //         } else {
+                    //             break;
+                    //         }
+                    //     } while(d1 < e4);
+                    //     if(d1 < e4) {
+                    //         return p<uint8_t>(d1)-start;
+                    //     }
+                    // }
+                    // const uint8_t* const end = p<uint8_t>(d1) + len;
+                    while(d1 < end) {
+                        if(as<uint8_t>(d1) == as<uint8_t>(d2)) [[likely]] {
                             incptr<1>(d1);
                             incptr<1>(d2);
+                        } else {
+                            break;
                         }
-                    } while( d1 < end );
+                    }
                 }
 
-                return (uintptr_t)d1-start;
+                return p<uint8_t>(d1)-start;
             }
 
             /**
@@ -501,7 +606,7 @@ namespace heatshrink {
 
                 } else {
                     {
-                        const void* const end32 = (const uint8_t*)d1 + (len & ~3);
+                        const void* const end32 = p<uint8_t>(d1) + multof<4>(len);
                         while (d1 < end32 && as<uint32_t>(d1) == as<uint32_t>(d2)) {
                             incptr<4>(d1);
                             incptr<4>(d2);
@@ -511,7 +616,7 @@ namespace heatshrink {
                     if(d1 < end) {
                         // Find any common prefix in (d1+0)...(d1+sizeof(uint32_t)-1)
                         const uint32_t sml = subword_match_len(d1,d2);
-                        return std::min(len, (uint32_t)((const uint8_t*)d1-(end-len)+sml));
+                        return std::min(len, (uint32_t)(((p<uint8_t>(d1)+len)-end)+sml));
                     } else {
                         return len;
                     }
@@ -533,8 +638,7 @@ namespace heatshrink {
             static const uint8_t* find_pattern_scalar(const uint8_t* const pattern, const uint32_t patLen, const uint8_t* data, const uint32_t dataLen) noexcept {
                 if(patLen > sizeof(uint32_t)) {
                     return find_pattern_long_scalar(pattern, patLen, data, dataLen);
-                } else
-                {
+                } else {
                     return find_pattern_short_scalar(pattern,patLen, data, dataLen);
                 }
             }

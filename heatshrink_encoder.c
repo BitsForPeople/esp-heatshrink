@@ -24,26 +24,33 @@ typedef enum {
 } HSE_state;
 
 #if HEATSHRINK_DEBUGGING_LOGS
-#include <stdio.h>
-#include <ctype.h>
-#include <assert.h>
-#define LOG(...) fprintf(stderr, __VA_ARGS__)
-#define ASSERT(X) assert(X)
-static const char *state_names[] = {
-    "not_full",
-    "filled",
-    "search",
-    "yield_tag_bit",
-    "yield_literal",
-    "yield_br_index",
-    "yield_br_length",
-    "save_backlog",
-    "flush_bits",
-    "done",
-};
+    #if ESP_PLATFORM
+        #include "esp_log.h"
+        static const char* const TAG = "hsenc";
+        #define LOG(...) ESP_LOGD(TAG, __VA_ARGS__)
+    #else
+        #include <stdio.h>
+        #include <ctype.h>
+        #define LOG(...) fprintf(stderr, __VA_ARGS__)
+    #endif
+
+    #include <assert.h>
+    #define ASSERT(X) assert(X)static const char *state_names[] = {
+        "not_full",
+        "filled",
+        "search",
+        "yield_tag_bit",
+        "yield_literal",
+        "yield_br_index",
+        "yield_br_length",
+        "save_backlog",
+        "flush_bits",
+        "done",
+    };
+
 #else
-#define LOG(...) /* no-op */
-#define ASSERT(X) /* no-op */
+    #define LOG(...) /* no-op */
+    #define ASSERT(X) /* no-op */
 #endif
 
 // Encoder flags

@@ -1,0 +1,18 @@
+menu "heatshrink"
+	config HEATSHRINK_USE_INDEX
+	bool "Use an index to speed up compression (uses more RAM)"
+	default n
+	help
+		Enables HEATSHRINK_USE_INDEX for compression; this increases RAM requirement during compression 
+		to about 3x, but can speed up compression by a factor of 10-20x.
+		
+	config HEATSHRINK_32BIT
+	# depends on !HEATSHRINK_USE_INDEX
+	bool "Use 32-bit or SIMD optimized code for compression"
+	default y
+	help
+		Enables HEATSHRINK_32BIT (32-bit optimizations).
+		If use of the index is not enabled, this also enables speed-optimized compression functions.
+		On ESP32-S3, these functions make use of the chip's SIMD instructions ("PIE") for increased speed.
+		
+endmenu

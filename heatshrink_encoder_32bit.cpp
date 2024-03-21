@@ -35,32 +35,33 @@ typedef enum {
 } HSE_state;
 
 #if HEATSHRINK_DEBUGGING_LOGS
-#if ESP_PLATFORM
-#include "esp_log.h"
-static const char* const TAG = "hsenc";
-#define LOG(...) ESP_LOGD(TAG, __VA_ARGS__)
+    #if ESP_PLATFORM
+        #include "esp_log.h"
+        static const char* const TAG = "hsenc";
+        #define LOG(...) ESP_LOGD(TAG, __VA_ARGS__)
+    #else
+        #include <stdio.h>
+        #include <ctype.h>
+        #define LOG(...) fprintf(stderr, __VA_ARGS__)
+    #endif
+    
+    #include <assert.h>
+    #define ASSERT(X) assert(X)
+    static const char *state_names[] = {
+        "not_full",
+        "filled",
+        "search",
+        "yield_tag_bit",
+        "yield_literal",
+        "yield_br_index",
+        "yield_br_length",
+        "save_backlog",
+        "flush_bits",
+        "done",
+    };
 #else
-#include <stdio.h>
-#include <ctype.h>
-#define LOG(...) fprintf(stderr, __VA_ARGS__)
-#endif
-#include <assert.h>
-#define ASSERT(X) assert(X)
-static const char *state_names[] = {
-    "not_full",
-    "filled",
-    "search",
-    "yield_tag_bit",
-    "yield_literal",
-    "yield_br_index",
-    "yield_br_length",
-    "save_backlog",
-    "flush_bits",
-    "done",
-};
-#else
-#define LOG(...) /* no-op */
-#define ASSERT(X) /* no-op */
+    #define LOG(...) /* no-op */
+    #define ASSERT(X) /* no-op */
 #endif
 
 constexpr uint8_t BIT_INDEX_INIT = 0x0;
@@ -134,14 +135,16 @@ heatshrink_encoder *heatshrink_encoder_alloc(const uint8_t window_sz2,
 }
 
 void heatshrink_encoder_free(heatshrink_encoder *hse) {
-    size_t buf_sz = (2 << HEATSHRINK_ENCODER_WINDOW_BITS(hse));
 #if HEATSHRINK_USE_INDEX
-    size_t index_sz = sizeof(struct hs_index) + hse->search_index->size;
-    HEATSHRINK_FREE(hse->search_index, index_sz);
-    (void)index_sz;
+    {
+    // const size_t index_sz = sizeof(struct hs_index) + hse->search_index->size;
+    HEATSHRINK_FREE(hse->search_index, /*index_sz*/ (sizeof(struct hs_index) + hse->search_index->size));
+    }
 #endif
-    HEATSHRINK_FREE(hse, sizeof(heatshrink_encoder) + buf_sz);
-    (void)buf_sz;
+    {
+    // const size_t buf_sz = (2 << HEATSHRINK_ENCODER_WINDOW_BITS(hse));
+    HEATSHRINK_FREE(hse, (sizeof(heatshrink_encoder) + /* buf_sz */ (2 << HEATSHRINK_ENCODER_WINDOW_BITS(hse))));
+    }
 }
 #endif
 
@@ -265,10 +268,12 @@ HSE_poll_res heatshrink_encoder_poll(heatshrink_encoder *hse,
             break;
         case HSES_FLUSH_BITS:
             hse->state = st_flush_bit_buffer(hse, &oi);
-            [[fallthrough]];
+            // [[fallthrough]];
+            break;
         case HSES_DONE:
             return HSER_POLL_EMPTY;
         default:
+            [[unlikely]]
             LOG("-- bad state %s\n", state_names[hse->state]);
             return HSER_POLL_ERROR_MISUSE;
         }
@@ -325,10 +330,6 @@ static HSE_state st_step_search(heatshrink_encoder *hse) {
         end = get_input_offset(hse) + msi;
         start = end - get_input_buffer_size(hse) /* window_length */;
         max_possible = std::min((uint_t)(hse->input_size-msi), lookahead_sz);
-        // uint_t max_possible = lookahead_sz;
-        // if (hse->input_size - msi < lookahead_sz) {
-        //     max_possible = hse->input_size - msi;
-        // }
     }
 
     uint_t match_length = 0;
@@ -422,7 +423,7 @@ static HSE_state st_flush_bit_buffer(heatshrink_encoder *hse,
         return HSES_DONE;
     } else if (can_take_byte(oi)) {
         LOG("-- flushing remaining byte (bit_index == 0x%02x)\n", hse->bit_index);
-        oi->buf[(*oi->output_size)++] = hse->current_byte;
+        oi->buf[(*oi->output_size)++] = (hse->current_byte << (8-hse->bit_index));
         LOG("-- done!\n");
         return HSES_DONE;
     } else {
@@ -485,8 +486,6 @@ static void do_indexing(heatshrink_encoder *hse) {
         index[i] = lv;
         last[v] = i;
     }
-#else
-    (void)hse;
 #endif
 }
 

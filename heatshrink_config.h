@@ -7,7 +7,9 @@
 #endif
 
 /* Should the (32-bit) optimized variant be built? (Faster on 32 bit architectures.) */
-#define HEATSHRINK_32BIT 1
+#ifndef HEATSHRINK_32BIT
+    #define HEATSHRINK_32BIT 1
+#endif
 
 #if HEATSHRINK_DYNAMIC_ALLOC
     /* Optional replacement of malloc/free */
@@ -25,6 +27,8 @@
 
 /* Use indexing for faster compression. (Increases RAM requirement by ~200%, disables use
    of the 32-bit search functions.) */
-#define HEATSHRINK_USE_INDEX 0
+#ifndef HEATSHRINK_USE_INDEX
+    #define HEATSHRINK_USE_INDEX 0
+#endif
 
 #endif

@@ -6,15 +6,12 @@ Instruction Extensions", "PIE") in data compression.
 The original heatshrink is made into a component for use in ESP-IDF builds and speed-optimized for
 32 bit architectures like the ESP32s', including new and faster pattern-match search functions.
 
-The new search functions take advantage of Xtensa's "zero-overhead loops" when built for supporting
-Xtensa-based ESP32 MCUs (ESP32, ESP32-S3).
-
 On the **ESP32-S3**, the MCU's SIMD instructions ("PIE") are used which further speeds up compression
 by a factor of _a lot_.
 
 Use of the 32-bit optimized variant can be enabled/disabled by setting `HEATSHRINK_32BIT` to 1 or 0
-in `heatshrink_config.h`; then, if built via ESP-IDF, ESP32 optimizations are automatically
-enabled based on the build's target SoC, with plain C/C++ fallbacks in place for non-Xtensa platforms.
+in `heatshrink_config.h`; then, if built via ESP-IDF for an ESP32-S3, the SIMD variant is automatically
+built.
 
 ## Exemplary benchmarks
 
@@ -25,9 +22,8 @@ Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes:
 | Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
 | Original (C) | 100829896 | 420,1 ms | 100,0 % | 1,0 x |
-| 32-bit, New Search (C/C++) | 38911824 | 162,1 ms | 38,6 % | 2,6 x |
-| Xtensa optimized (C/C++/inl. asm.) | 34488868 | 143,7 ms | 34,2 % | 2,9 x |
-| ESP32-S3 SIMD (C/C++/inl. asm.) | 5248242 | 21,9 ms | 5,2 % | 19,2 x |
+| 32-bit, New Search (C/C++) | 31076812 | 129,5 ms | 30,8 % | 3,2 x |
+| ESP32-S3 SIMD (C/C++/inl. asm.) | 5288507 | 22,0 ms | 5,2 % | 19,1 x |
 | Original w/ USE_INDEX(*) (C) | 3636812 | 15,2 ms | 3,6 % | 27,7 x |
 
 Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
@@ -35,8 +31,7 @@ Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
 | Variant | CPU cycles | Time @ 240MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
 | Original (C) | 27143074 | 113,1 ms | 100,0 % | 1,0 x |
-| 32-bit, New Search (C/C++) | 10981088 | 45,8 ms | 40,5 % | 2,5 x |
-| Xtensa optimized (C/C++/inl. asm.) | 9744568 | 40,6 ms | 35,9 % | 2,8 x |
+| 32-bit, New Search (C/C++) | 8713744 | 36,3 ms | 32,1 % | 3,1 x |
 | ESP32-S3 SIMD (C/C++/inl. asm.) | 2000388 | 8,3 ms | 7,4 % | 13,6 x |
 | Original w/ USE_INDEX(*) (C) | 2044378 | 8,5 ms | 7,5 % | 13,3 x |
 
@@ -47,7 +42,7 @@ Heatshrink **(12,4)**, compressing 5614 bytes of text down to 2635 bytes:
 | Variant | CPU cycles | Time @ 160MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
 | Original (C) | 100778552 | 629,9 ms | 100,0 % | 1,0 x |
-| 32-bit, New Search (C/C++) | 54724768 | 342,0 ms | 54,3 % | 1,8 x |
+| 32-bit, New Search (C/C++) | 27509855 | 171,9 ms | 27,3 % | 3,7 x |
 | Original w/ USE_INDEX(*) (C) | 3495174 | 21,8 ms | 3,5 % | 28,8 x |
 
 Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
@@ -55,7 +50,7 @@ Heatshrink **(10,4)**, compressing 5614 bytes of text down to 2831 bytes:
 | Variant | CPU cycles | Time @ 160MHz | Time (relative) | Speed (relative) |
 |--|--|--|--|--|
 | Original (C) | 27101012 | 169,4 ms | 100,0 % | 1,0 x |
-| 32-bit, New Search (C/C++) | 14528170 | 90,8 ms | 53,6 % | 1,9 x |
+| 32-bit, New Search (C/C++) | 7674801 | 48,0 ms | 28,3 % | 3,5 x |
 | Original w/ USE_INDEX(*) (C) | 1997088 | 12,5 ms | 7,4 % | 13,6 x |
 
 (*) HEATSHRINK_USE_INDEX increases RAM requirement for compression by ~3x

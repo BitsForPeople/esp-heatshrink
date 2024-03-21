@@ -56,20 +56,28 @@ struct hs_index {
 };
 #endif
 
+#if 0 && HEATSHRINK_32BIT
+typedef uint32_t hs_word_t;
+typedef uint32_t hs_hword_t;
+#else
+typedef uint16_t hs_word_t;
+typedef uint8_t hs_hword_t;
+#endif
+
 typedef struct {
-    uint16_t input_size;        /* bytes in input buffer */
-    uint16_t match_scan_index;
-    uint16_t match_length;
-    uint16_t match_pos;
-    uint16_t outgoing_bits;     /* enqueued outgoing bits */
-    uint8_t outgoing_bits_count;
-    uint8_t flags;
-    uint8_t state;              /* current state machine node */
-    uint8_t current_byte;       /* current byte of output */
-    uint8_t bit_index;          /* current bit index */
+    hs_word_t input_size;        /* bytes in input buffer */
+    hs_word_t match_scan_index;
+    hs_word_t match_length;
+    hs_word_t match_pos;
+    hs_word_t outgoing_bits;     /* enqueued outgoing bits */
+    hs_hword_t outgoing_bits_count;
+    hs_hword_t flags;
+    hs_hword_t state;              /* current state machine node */
+    hs_hword_t current_byte;       /* current byte of output */
+    hs_hword_t bit_index;          /* current bit index */
 #if HEATSHRINK_DYNAMIC_ALLOC
-    uint8_t window_sz2;         /* 2^n size of window */
-    uint8_t lookahead_sz2;      /* 2^n size of lookahead */
+    hs_hword_t window_sz2;         /* 2^n size of window */
+    hs_hword_t lookahead_sz2;      /* 2^n size of lookahead */
 #if HEATSHRINK_USE_INDEX
     struct hs_index *search_index;
 #endif
