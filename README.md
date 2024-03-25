@@ -9,9 +9,9 @@ The original heatshrink is made into a component for use in ESP-IDF builds and s
 On the **ESP32-S3**, the MCU's SIMD instructions ("PIE") are used which further speeds up compression
 by a factor of _a lot_.
 
-Use of the 32-bit optimized variant can be enabled/disabled by setting `HEATSHRINK_32BIT` to 1 or 0
-in `heatshrink_config.h`; then, if built via ESP-IDF for an ESP32-S3, the SIMD variant is automatically
-built.
+Use of the 32-bit optimized variant can be enabled/disabled via menuconfig or by setting `HEATSHRINK_32BIT`
+to 1 or 0 in `heatshrink_config.h`; then, if built via ESP-IDF for an ESP32-S3, the SIMD variant is
+automatically built.
 
 ## Exemplary benchmarks
 
